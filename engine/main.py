@@ -56,6 +56,7 @@ DEFAULT_SETTINGS = {
     "tiktok_accounts": [], "instagram_accounts": [], "pages": ["https://www.bfmtv.com/marseille/"], "rss_feeds": [],
     "lookback": 200, "max_duration_min": 20, "tail_seconds": 60, "frame_interval": 2, "threshold": 70,
     "whisper_enabled": True, "face_enabled": True, "voice_enabled": True, "max_quality": 2160,
+    "youtube_enabled": False,
 }
 START = datetime.now(timezone.utc)
 
@@ -805,7 +806,7 @@ def main():
     errors, checked, found = [], 0, 0
     tmp = tempfile.mkdtemp()
     # état de chaque plateforme, affiché dans l'app
-    plat = {"youtube": ("off", "Aucune chaîne dans les réglages"),
+    plat = {"youtube": ("off", "Désactivé : YouTube bloque l'analyse depuis un serveur (voir le mode d'emploi)"),
             "bfmtv": ("off", "Aucune rubrique dans les réglages"),
             "tiktok": ("off", "Aucun compte dans les réglages"),
             "instagram": ("off", "Session Instagram non configurée" if not IG_SESSIONID
@@ -872,7 +873,8 @@ def main():
 
     # 2) sources surveillées, dans l'ordre des réglages
     candidates = []
-    sources = [("youtube", list_youtube, ch, (s["lookback"],)) for ch in s["youtube_channels"]] + \
+    yt = list_youtube if s.get("youtube_enabled") else None
+    sources = ([("youtube", list_youtube, ch, (s["lookback"],)) for ch in s["youtube_channels"]] if yt else []) + \
               [("tiktok", list_tiktok, a, (s["lookback"],)) for a in s["tiktok_accounts"]] + \
               [("instagram", list_instagram, a, (s["lookback"],)) for a in s["instagram_accounts"]] + \
               [("bfmtv", list_page, p, ()) for p in s["pages"]] + \

@@ -775,7 +775,7 @@ function Notifications() {
 /* ---------------------------------------------------------------- plateformes */
 
 const PLATFORM_INFO = [
-  { key: 'youtube', name: 'YouTube', account: 'Compte secondaire requis', how: 'YouTube bloque les serveurs qui font la veille. Pour analyser ses vidéos, il faut créer un compte Google secondaire, dédié à l’app (jamais ton compte perso), et fournir ses cookies. Inutile de s’abonner aux chaînes.' },
+  { key: 'youtube', name: 'YouTube', account: 'Indisponible en ligne', how: 'YouTube exige désormais un jeton spécial que les serveurs comme GitHub ne peuvent pas fournir : l’analyse automatique de YouTube n’est pas possible en ligne. Tes sujets BFM Marseille restent couverts par bfmtv.com. Pour inclure YouTube, il faudrait faire tourner le moteur sur un ordinateur chez toi (voir le mode d’emploi).' },
   { key: 'bfmtv', name: 'bfmtv.com', account: 'Sans compte', how: 'Lecture directe des rubriques du site.' },
   { key: 'tiktok', name: 'TikTok', account: 'Sans compte', how: 'Lecture directe des comptes publics.' },
   { key: 'instagram', name: 'Instagram', account: 'Compte requis', how: 'Un compte Instagram secondaire connecté (inutile de suivre les pages). À paramétrer plus tard.' },
@@ -785,7 +785,6 @@ const PLATFORM_INFO = [
 
 const STATUS_LABEL = { ok: 'Fonctionne', error: 'Problème', off: 'Non configuré' }
 const HELP = {
-  youtube: 'Refais l’export des cookies du compte Google secondaire en suivant la méthode du mode d’emploi (fenêtre de navigation privée).',
   instagram: 'Bloqué ou non configuré tant que la session du compte Instagram secondaire n’est pas ajoutée.',
 }
 
@@ -1117,7 +1116,7 @@ function Guide({ goTab }) {
         <table className="guide-table">
           <thead><tr><th>Plateforme</th><th>Où trouver le lien</th><th>Exemple</th><th>Compte requis</th></tr></thead>
           <tbody>
-            <tr><td>YouTube</td><td>Ouvre la chaîne, puis copie l’adresse de la page (celle qui contient le @).</td><td>youtube.com/@BFM-Marseille</td><td>Compte Google secondaire (déjà en place)</td></tr>
+            <tr><td>YouTube</td><td>Non analysé en ligne (voir « Si une plateforme est bloquée »).</td><td>—</td><td>Nécessite un ordinateur chez toi</td></tr>
             <tr><td>TikTok</td><td>Ouvre le profil du compte, puis Partager → Copier le lien.</td><td>tiktok.com/@nomducompte</td><td>Non</td></tr>
             <tr><td>Instagram</td><td>Ouvre le profil, puis ••• → Copier l’URL du profil.</td><td>instagram.com/nomducompte</td><td>Compte Instagram secondaire (voir plus bas)</td></tr>
             <tr><td>bfmtv.com</td><td>Ouvre la rubrique qui liste les vidéos, par exemple la page Marseille.</td><td>bfmtv.com/marseille/</td><td>Non</td></tr>
@@ -1181,17 +1180,8 @@ function Guide({ goTab }) {
         <summary>Si une plateforme est bloquée</summary>
         <p>Réglages → Plateformes indique l’état de chaque réseau après chaque passage.</p>
         <ul>
-          <li><strong>YouTube bloqué</strong> : les cookies du compte Google secondaire ont expiré ou ont été renouvelés par le navigateur. Il faut les exporter depuis une fenêtre privée, qu’on ferme aussitôt, pour que YouTube ne les renouvelle plus.
-            <ol>
-              <li>Dans le profil Chrome « Reportages », ouvre chrome://extensions, puis Get cookies.txt LOCALLY → Détails, et active « Autoriser en navigation privée ».</li>
-              <li>Ouvre une fenêtre de navigation privée (Ctrl + Maj + N) et connecte-toi à youtube.com avec le compte secondaire.</li>
-              <li>Dans ce même onglet, va à l’adresse youtube.com/robots.txt.</li>
-              <li>Clique sur l’extension, puis « Export ».</li>
-              <li>Ferme tout de suite la fenêtre privée, sans te déconnecter.</li>
-              <li>Envoie le fichier, ou colle son contenu dans GitHub : repo mes-reportages → Settings → Secrets and variables → Actions → <code>YT_COOKIES</code> → Update.</li>
-            </ol>
-          </li>
-          <li><strong>Mettre en place Instagram</strong> :
+          <li><strong>YouTube n’est pas analysé en ligne.</strong> YouTube exige maintenant un jeton spécial que les serveurs (GitHub, hébergeurs…) ne peuvent pas produire : l’analyse automatique de YouTube depuis le cloud n’est plus possible. Ce n’est pas un réglage à corriger. Tes reportages BFM Marseille restent couverts par bfmtv.com. Si tu veux vraiment inclure YouTube, il faut faire tourner le moteur sur un ordinateur chez toi ; demande-moi la marche à suivre.</li>
+                    <li><strong>Mettre en place Instagram</strong> :
             <ol>
               <li>Crée un compte Instagram secondaire (inutile de suivre les pages).</li>
               <li>Connecte-toi avec sur instagram.com, depuis le profil Chrome « Reportages ».</li>

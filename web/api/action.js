@@ -3,7 +3,7 @@ import { guard, updateJson } from './_lib.js'
 const STATUSES = ['pending', 'kept', 'rejected']
 const SETTING_KEYS = ['name_variants', 'youtube_channels', 'tiktok_accounts', 'instagram_accounts', 'pages',
   'rss_feeds', 'lookback', 'max_duration_min', 'tail_seconds', 'frame_interval', 'threshold',
-  'whisper_enabled', 'face_enabled', 'voice_enabled', 'max_quality']
+  'whisper_enabled', 'face_enabled', 'voice_enabled', 'max_quality', 'youtube_enabled']
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
