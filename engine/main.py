@@ -869,6 +869,7 @@ def main():
         except Exception as e:
             msg = str(e).splitlines()[0][:200]
             errors.append(f"Source {src} : {msg}")
+            log("Source en échec:", src, msg[:300])
             blocked_kw = ("Sign in", "429", "login", "rate", "wait a few minutes", "checkpoint", "401", "403")
             plat[kind] = ("error", ("Bloqué par la plateforme : " if any(k in msg for k in blocked_kw)
                                     else "Erreur : ") + msg[:140])
@@ -897,6 +898,7 @@ def main():
             checked += 1
         except Exception as e:
             msg = str(e).splitlines()[0][:250]
+            log("Échec analyse:", v.get("source"), msg[:300])
             if any(k in msg for k in ("Sign in to confirm", "429", "login required", "rate-limit", "Please wait a few minutes", "checkpoint",
                                  "needs to be reloaded", "cookies are no longer valid", "not a bot")):
                 blocked.add(v["source"])
