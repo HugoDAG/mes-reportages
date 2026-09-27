@@ -421,3 +421,4 @@ button.mini { border: 0; padding: 0; cursor: pointer; display: block; width: 100
   .alog-row { grid-template-columns: 72px 1fr; }
   .alog-side { grid-column: 2; justify-items: start; display: flex; gap: 10px; align-items: center; }
 }
+.plat-help { margin: 4px 0 0; font-size: 0.85rem; color: var(--ambre); }

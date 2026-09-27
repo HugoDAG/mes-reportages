@@ -18,7 +18,7 @@ Ce repo public ne contient aucune donnée personnelle : le nom recherché, les r
 
 | Plateforme | Compte requis ? |
 |---|---|
-| YouTube | Non (compte secondaire en secours, via le secret `YT_COOKIES`, si YouTube bloque) |
+| YouTube | Oui, un compte Google **secondaire** dédié à l'app (YouTube bloque les serveurs de GitHub). Ses cookies vont dans le secret `YT_COOKIES` |
 | bfmtv.com | Non |
 | TikTok | Non |
 | Instagram | Oui, un compte secondaire, sans besoin de suivre les pages. Secrets `IG_SESSIONID` et `IG_USERNAME` |

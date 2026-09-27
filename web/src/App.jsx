@@ -782,7 +782,7 @@ function Notifications() {
 /* ---------------------------------------------------------------- plateformes */
 
 const PLATFORM_INFO = [
-  { key: 'youtube', name: 'YouTube', account: 'Sans compte', how: 'Lecture directe des chaînes publiques. Un compte secondaire ne sert qu’en secours si YouTube bloque.' },
+  { key: 'youtube', name: 'YouTube', account: 'Compte secondaire requis', how: 'YouTube bloque les serveurs qui font la veille. Pour analyser ses vidéos, il faut créer un compte Google secondaire, dédié à l’app (jamais ton compte perso), et fournir ses cookies. Inutile de s’abonner aux chaînes.' },
   { key: 'bfmtv', name: 'bfmtv.com', account: 'Sans compte', how: 'Lecture directe des rubriques du site.' },
   { key: 'tiktok', name: 'TikTok', account: 'Sans compte', how: 'Lecture directe des comptes publics.' },
   { key: 'instagram', name: 'Instagram', account: 'Compte requis', how: 'Un compte Instagram secondaire connecté (inutile de suivre les pages). À paramétrer plus tard.' },
@@ -791,6 +791,10 @@ const PLATFORM_INFO = [
 ]
 
 const STATUS_LABEL = { ok: 'Fonctionne', error: 'Problème', off: 'Non configuré' }
+const HELP = {
+  youtube: 'Bloqué tant que les cookies du compte Google secondaire ne sont pas ajoutés.',
+  instagram: 'Bloqué ou non configuré tant que la session du compte Instagram secondaire n’est pas ajoutée.',
+}
 
 function Platforms({ rows = {} }) {
   return (
@@ -804,7 +808,7 @@ function Platforms({ rows = {} }) {
             <li key={p.key} className={`plat ${st}`}>
               <div className="plat-head">
                 <strong>{p.name}</strong>
-                <span className={`acct ${p.account === 'Sans compte' ? 'free' : p.account === 'Compte requis' ? 'need' : 'link'}`}>{p.account}</span>
+                <span className={`acct ${p.account === 'Sans compte' ? 'free' : p.account.startsWith('Compte') ? 'need' : 'link'}`}>{p.account}</span>
               </div>
               <p className="plat-how">{p.how}</p>
               <p className="plat-state">
@@ -812,6 +816,7 @@ function Platforms({ rows = {} }) {
                   : st === 'wait' ? 'En attente du premier passage'
                   : <>{STATUS_LABEL[st]}{r?.detail ? ` : ${r.detail}` : ''}{r?.updated_at ? ` (${fmtDateTime(r.updated_at)})` : ''}</>}
               </p>
+              {st !== 'ok' && HELP[p.key] && <p className="plat-help">{HELP[p.key]}</p>}
             </li>
           )
         })}
