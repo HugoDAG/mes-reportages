@@ -1,0 +1,74 @@
+name: Veille reportages
+
+on:
+  schedule:
+    - cron: "0 4 */2 * *"   # tous les 2 jours à 4h UTC (6h à Paris en été)
+  workflow_dispatch:         # bouton « Run workflow » pour lancer à la main
+
+concurrency:
+  group: veille
+  cancel-in-progress: false
+
+permissions:
+  contents: write            # pour le « battement de cœur » mensuel (voir en bas)
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: engine/requirements.txt
+
+      - name: Outils (ffmpeg)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg libsndfile1
+
+      - name: Modèles en cache (Whisper, visage, voix)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/speechbrain
+            ~/.insightface
+          key: models-v2
+
+      - name: Dépendances Python
+        run: |
+          pip install -q torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -q -U -r engine/requirements.txt   # -U : yt-dlp toujours à jour
+
+      - name: Cookies (facultatifs)
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: printf '%s' "$YT_COOKIES" > "$RUNNER_TEMP/cookies.txt"
+
+      - name: Lancer la veille
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          STORAGE_REPO: HugoDAG/mes-tournages-stockage
+          STORAGE_TOKEN: ${{ secrets.STORAGE_TOKEN }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          IG_SESSIONID: ${{ secrets.IG_SESSIONID }}
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          YT_COOKIES_FILE: ${{ runner.temp }}/cookies.txt
+          MAX_RUN_MINUTES: "300"
+        run: python engine/main.py
+
+      # GitHub désactive les tâches planifiées d'un repo public sans activité
+      # pendant 60 jours. Un commit vide en début de mois l'évite.
+      - name: Battement de cœur mensuel
+        if: always()
+        run: |
+          if [ "$(date +%d)" -le 02 ]; then
+            git config user.name "veille-bot"
+            git config user.email "veille-bot@users.noreply.github.com"
+            git commit --allow-empty -m "veille: maintien actif $(date +%Y-%m)"
+            git push
+          fi

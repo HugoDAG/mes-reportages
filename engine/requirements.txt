@@ -1,0 +1,15 @@
+yt-dlp
+faster-whisper==1.1.1
+speechbrain==1.0.3
+insightface==0.7.3
+onnxruntime==1.20.1
+opencv-python-headless
+soundfile
+numpy<2.1
+supabase>=2.4
+requests
+feedparser
+beautifulsoup4
+rapidfuzz
+instaloader
+pywebpush
