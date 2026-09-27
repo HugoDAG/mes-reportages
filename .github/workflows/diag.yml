@@ -1,0 +1,33 @@
+name: Diag TikTok
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: "Compte TikTok à tester"
+        default: "https://www.tiktok.com/@bfmtv"
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -q -U yt-dlp requests
+      - env:
+          STORAGE_TOKEN: ${{ secrets.STORAGE_TOKEN }}
+          ACCOUNT: ${{ github.event.inputs.account }}
+        run: |
+          python3 - <<'PY'
+          import subprocess, base64, json, requests, os
+          acc=os.environ["ACCOUNT"]
+          out=subprocess.run(["yt-dlp","--flat-playlist","--playlist-end","5","--print","%(id)s|%(title).50s",acc],
+                             capture_output=True,text=True)
+          report={"account":acc,"stdout":out.stdout[-1500:],"stderr":out.stderr.splitlines()[-1][:300] if out.stderr else "","rc":out.returncode}
+          repo="HugoDAG/mes-tournages-stockage"; H={"Authorization":f"Bearer {os.environ['STORAGE_TOKEN']}","Accept":"application/vnd.github+json"}
+          url=f"https://api.github.com/repos/{repo}/contents/data/diag_tiktok.json"
+          sha=requests.get(url,headers=H).json().get("sha")
+          body={"message":"diag tiktok","content":base64.b64encode(json.dumps(report,indent=1).encode()).decode()}
+          if sha: body["sha"]=sha
+          print(requests.put(url,headers=H,json=body).status_code)
+          PY
