@@ -422,3 +422,26 @@ button.mini { border: 0; padding: 0; cursor: pointer; display: block; width: 100
   .alog-side { grid-column: 2; justify-items: start; display: flex; gap: 10px; align-items: center; }
 }
 .plat-help { margin: 4px 0 0; font-size: 0.85rem; color: var(--ambre); }
+
+/* Comptes surveillés */
+.sources { max-width: 620px; margin-bottom: 18px; }
+.sources .inline { margin-top: 8px; }
+.forced { margin-top: 8px; width: 100%; }
+.src-group { margin-top: 14px; }
+.src-title { font: 700 1rem 'Barlow Condensed', sans-serif; margin: 0 0 4px; color: var(--gris); }
+.src-list { list-style: none; margin: 0; padding: 0; }
+.src-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--ligne); }
+.src-list a { color: var(--encre); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* Mode d'emploi */
+.guide { max-width: 720px; }
+.guide details { border-bottom: 1px solid var(--ligne); padding: 4px 0; }
+.guide summary { font: 700 1.2rem 'Barlow Condensed', sans-serif; padding: 10px 0; cursor: pointer; color: var(--encre); }
+.guide p, .guide li { max-width: 68ch; }
+.guide ul, .guide ol { padding-left: 1.3em; }
+.guide li { margin: 4px 0; }
+.guide code { background: var(--carte); border: 1px solid var(--ligne); border-radius: 4px; padding: 0 4px; font-size: 0.9em; }
+.guide-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 8px 0; display: block; overflow-x: auto; }
+.guide-table th, .guide-table td { text-align: left; vertical-align: top; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--ligne); }
+.guide-table th { color: var(--gris); font-weight: 600; }
+.guide-table td:first-child { font-weight: 600; white-space: nowrap; }

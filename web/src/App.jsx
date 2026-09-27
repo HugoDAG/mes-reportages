@@ -44,6 +44,7 @@ const TABS = [
   { key: 'me', label: 'Visage et voix' },
   { key: 'history', label: 'Analyses' },
   { key: 'settings', label: 'Réglages' },
+  { key: 'guide', label: 'Mode d’emploi' },
 ]
 
 const fmtDate = (d) =>
@@ -179,7 +180,8 @@ function Dashboard({ data, setData, reload, onOut }) {
       )}
       {tab === 'me' && <References settings={settings} />}
       {tab === 'history' && <><LiveRun run={runs[0]} /><AnalysisLog items={analyses || []} /><History runs={runs} /></>}
-      {tab === 'settings' && settings && <><Notifications /><Platforms rows={platforms} /><Settings initial={settings} onSaved={load} /></>}
+      {tab === 'settings' && settings && <><Notifications /><Platforms rows={platforms} /><SourcesManager settings={settings} onSaved={load} goGuide={() => setTab('guide')} /><Settings initial={settings} onSaved={load} /></>}
+      {tab === 'guide' && <Guide goTab={setTab} />}
       {playing && <Player v={playing} onClose={() => setPlaying(null)} />}
 
       <footer className="foot">
@@ -606,8 +608,7 @@ const toArr = (s) => s.split('\n').map((x) => x.trim()).filter(Boolean)
 
 function Settings({ initial, onSaved }) {
   const [f, setF] = useState({
-    names: lines(initial.name_variants), channels: lines(initial.youtube_channels),
-    tiktok: lines(initial.tiktok_accounts), instagram: lines(initial.instagram_accounts), max_quality: initial.max_quality, pages: lines(initial.pages), feeds: lines(initial.rss_feeds),
+    names: lines(initial.name_variants), max_quality: initial.max_quality,
     lookback: initial.lookback, max_duration_min: initial.max_duration_min,
     tail_seconds: initial.tail_seconds, frame_interval: initial.frame_interval, threshold: initial.threshold,
     whisper_enabled: initial.whisper_enabled, face_enabled: initial.face_enabled, voice_enabled: initial.voice_enabled,
@@ -618,8 +619,7 @@ function Settings({ initial, onSaved }) {
   const save = async () => {
     setMsg('')
     const payload = {
-      name_variants: toArr(f.names), youtube_channels: toArr(f.channels), tiktok_accounts: toArr(f.tiktok), instagram_accounts: toArr(f.instagram), max_quality: Number(f.max_quality) || 2160,
-      pages: toArr(f.pages), rss_feeds: toArr(f.feeds),
+      name_variants: toArr(f.names), max_quality: Number(f.max_quality) || 2160,
       lookback: Number(f.lookback) || 200, max_duration_min: Number(f.max_duration_min) || 20,
       tail_seconds: Number(f.tail_seconds) || 60, frame_interval: Number(f.frame_interval) || 2,
       threshold: Number(f.threshold) || 70,
@@ -664,18 +664,8 @@ function Settings({ initial, onSaved }) {
       </fieldset>
 
       <fieldset>
-        <legend>Où chercher</legend>
-        <p className="hint">Les sources sont examinées dans cet ordre : mets en premier celles où tu publies le plus.</p>
-        <label htmlFor="channels">Chaînes YouTube</label>
-        <textarea id="channels" rows={3} value={f.channels} onChange={set('channels')} />
-        <label htmlFor="instagram">Comptes Instagram (ex. @bfmmarseille)</label>
-        <textarea id="instagram" rows={2} value={f.instagram} onChange={set('instagram')} />
-        <label htmlFor="tiktok">Comptes TikTok (ex. @bfmmarseille)</label>
-        <textarea id="tiktok" rows={2} value={f.tiktok} onChange={set('tiktok')} />
-        <label htmlFor="pages">Rubriques de sites (pages listant des vidéos)</label>
-        <textarea id="pages" rows={2} value={f.pages} onChange={set('pages')} />
-        <label htmlFor="feeds">Flux RSS</label>
-        <textarea id="feeds" rows={2} value={f.feeds} onChange={set('feeds')} placeholder="https://www.bfmtv.com/rss/…" />
+        <legend>Profondeur d’analyse</legend>
+        <p className="hint">Les comptes surveillés se gèrent dans le bloc « Comptes surveillés » ci-dessus.</p>
         <div className="row">
           <div>
             <label htmlFor="lookback">Vidéos récentes examinées par chaîne</label>
@@ -935,5 +925,235 @@ function AnalysisLog({ items }) {
         </>
       )}
     </section>
+  )
+}
+
+/* ---------------------------------------------------------------- comptes surveillés */
+
+const SOURCE_KINDS = [
+  { key: 'youtube_channels', label: 'YouTube', example: 'https://www.youtube.com/@BFM-Marseille' },
+  { key: 'tiktok_accounts', label: 'TikTok', example: 'https://www.tiktok.com/@nomducompte' },
+  { key: 'instagram_accounts', label: 'Instagram', example: 'https://www.instagram.com/nomducompte' },
+  { key: 'pages', label: 'bfmtv.com', example: 'https://www.bfmtv.com/marseille/' },
+  { key: 'rss_feeds', label: 'Flux RSS', example: 'https://…/rss.xml' },
+]
+
+const VIDEO_MSG = 'C’est le lien d’une vidéo, pas d’un compte. Pour l’ajouter, utilise « Ajouter une vidéo par son lien » dans Mes tournages.'
+
+function detectSource(raw, forced) {
+  const input = raw.trim()
+  if (!input) return { error: 'Colle le lien d’un compte ou d’une chaîne.' }
+  if (input.startsWith('@')) {
+    const handle = input.replace(/^@+/, '')
+    if (forced === 'youtube_channels') return { key: forced, value: `https://www.youtube.com/@${handle}` }
+    if (forced === 'tiktok_accounts') return { key: forced, value: `@${handle}` }
+    if (forced === 'instagram_accounts') return { key: forced, value: handle }
+    return { error: 'Choisis la plateforme dans le menu, ou colle le lien complet du compte.' }
+  }
+  let u
+  try { u = new URL(/^https?:\/\//.test(input) ? input : `https://${input}`) } catch { return { error: 'Ce lien n’est pas valide.' } }
+  const host = u.hostname.replace(/^www\.|^m\./, '')
+  const parts = u.pathname.split('/').filter(Boolean)
+  if (host.endsWith('youtube.com') || host === 'youtu.be') {
+    if (host === 'youtu.be' || parts[0] === 'watch' || parts[0] === 'shorts' || parts[0] === 'live') return { error: VIDEO_MSG }
+    if (!parts.length) return { error: 'Colle le lien de la chaîne, par exemple https://www.youtube.com/@BFM-Marseille' }
+    const base = ['channel', 'c', 'user'].includes(parts[0]) ? parts.slice(0, 2).join('/') : parts[0]
+    return { key: 'youtube_channels', value: `https://www.youtube.com/${base}` }
+  }
+  if (host.endsWith('tiktok.com')) {
+    if (parts.includes('video')) return { error: VIDEO_MSG }
+    if (!parts[0]?.startsWith('@')) return { error: 'Colle le lien du compte, par exemple https://www.tiktok.com/@nomducompte' }
+    return { key: 'tiktok_accounts', value: parts[0] }
+  }
+  if (host.endsWith('instagram.com')) {
+    if (['p', 'reel', 'reels', 'tv', 'stories'].includes(parts[0])) return { error: VIDEO_MSG }
+    if (!parts[0]) return { error: 'Colle le lien du compte, par exemple https://www.instagram.com/nomducompte' }
+    return { key: 'instagram_accounts', value: parts[0] }
+  }
+  if (host.endsWith('facebook.com') || host === 'fb.watch' || host === 'x.com' || host.endsWith('twitter.com')) {
+    return { error: 'Facebook et X ne peuvent pas être surveillés automatiquement. Colle plutôt le lien de chaque vidéo dans Mes tournages.' }
+  }
+  if (/rss|\.xml$|feed/i.test(u.pathname)) return { key: 'rss_feeds', value: u.href }
+  if (host.endsWith('bfmtv.com')) {
+    if (/_VN-?\d/.test(u.pathname)) return { error: VIDEO_MSG }
+    return { key: 'pages', value: u.href }
+  }
+  return { error: 'Cette plateforme n’est pas gérée. Plateformes possibles : YouTube, TikTok, Instagram, bfmtv.com ou un flux RSS.' }
+}
+
+const sourceLink = (key, v) =>
+  key === 'tiktok_accounts' ? `https://www.tiktok.com/${v.startsWith('@') ? v : '@' + v}`
+    : key === 'instagram_accounts' ? `https://www.instagram.com/${v.replace(/^@/, '')}`
+      : v
+
+function SourcesManager({ settings, onSaved, goGuide }) {
+  const [input, setInput] = useState('')
+  const [forced, setForced] = useState('')
+  const [msg, setMsg] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const save = async (key, list, okText) => {
+    setBusy(true)
+    try {
+      await act({ type: 'settings', settings: { [key]: list } })
+      setMsg({ ok: true, text: okText })
+      await onSaved()
+    } catch (e) {
+      setMsg({ ok: false, text: `Enregistrement impossible : ${e.message}` })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const add = async () => {
+    const r = detectSource(input, forced)
+    if (r.error) { setMsg({ ok: false, text: r.error }); return }
+    const list = settings[r.key] || []
+    if (list.some((x) => x.toLowerCase() === r.value.toLowerCase())) { setMsg({ ok: false, text: 'Ce compte est déjà surveillé.' }); return }
+    const label = SOURCE_KINDS.find((k) => k.key === r.key).label
+    await save(r.key, [...list, r.value], `${label} : ${r.value} ajouté. Il sera analysé au prochain passage.`)
+    setInput('')
+  }
+
+  const remove = (key, v) => save(key, (settings[key] || []).filter((x) => x !== v), `${v} retiré.`)
+
+  const total = SOURCE_KINDS.reduce((n, k) => n + (settings[k.key]?.length || 0), 0)
+
+  return (
+    <fieldset className="sources">
+      <legend>Comptes surveillés</legend>
+      <p className="hint">Colle le lien d’une chaîne ou d’un compte : la plateforme est reconnue toute seule. <button type="button" className="link" onClick={goGuide}>Où trouver ces liens ?</button></p>
+      <div className="inline">
+        <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()}
+          placeholder="https://www.youtube.com/@BFM-Marseille" aria-label="Lien du compte à surveiller" />
+        <button type="button" className="btn primary" onClick={add} disabled={!input || busy}>Ajouter</button>
+      </div>
+      {input.trim().startsWith('@') && (
+        <select value={forced} onChange={(e) => setForced(e.target.value)} aria-label="Plateforme" className="forced">
+          <option value="">Choisis la plateforme de ce @compte</option>
+          <option value="youtube_channels">YouTube</option>
+          <option value="tiktok_accounts">TikTok</option>
+          <option value="instagram_accounts">Instagram</option>
+        </select>
+      )}
+      {msg && <p className={msg.ok ? 'saved' : 'error'} role="status">{msg.text}</p>}
+
+      {!total && <p className="note">Aucun compte surveillé pour l’instant.</p>}
+      {SOURCE_KINDS.filter((k) => settings[k.key]?.length).map((k) => (
+        <div key={k.key} className="src-group">
+          <h3 className="src-title">{k.label}</h3>
+          <ul className="src-list">
+            {settings[k.key].map((v) => (
+              <li key={v}>
+                <a href={sourceLink(k.key, v)} target="_blank" rel="noreferrer">{v.replace(/^https:\/\/(www\.)?/, '')}</a>
+                <button type="button" className="link" onClick={() => remove(k.key, v)} disabled={busy}>Retirer</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      {settings.instagram_accounts?.length > 0 && (
+        <p className="plat-help">Instagram ne sera analysé qu’une fois la session du compte secondaire ajoutée (voir le mode d’emploi).</p>
+      )}
+    </fieldset>
+  )
+}
+
+/* ---------------------------------------------------------------- mode d'emploi */
+
+function Guide({ goTab }) {
+  const Go = ({ to, children }) => <button type="button" className="link" onClick={() => goTab(to)}>{children}</button>
+  return (
+    <article className="guide">
+      <h2 className="h2">Mode d’emploi</h2>
+      <p className="lead">L’app analyse toute seule, tous les deux jours, les nouvelles vidéos des comptes que tu surveilles. Chaque vidéo où elle reconnaît ton nom, ton visage ou ta voix est téléchargée et rangée dans Mes tournages.</p>
+
+      <details open>
+        <summary>Ajouter un compte à surveiller</summary>
+        <p>Va dans <Go to="settings">Réglages</Go>, bloc « Comptes surveillés ». Colle le lien du compte, puis clique sur « Ajouter ». La plateforme est reconnue toute seule, et le compte est analysé au passage suivant.</p>
+        <table className="guide-table">
+          <thead><tr><th>Plateforme</th><th>Où trouver le lien</th><th>Exemple</th><th>Compte requis</th></tr></thead>
+          <tbody>
+            <tr><td>YouTube</td><td>Ouvre la chaîne, puis copie l’adresse de la page (celle qui contient le @).</td><td>youtube.com/@BFM-Marseille</td><td>Compte Google secondaire (déjà en place)</td></tr>
+            <tr><td>TikTok</td><td>Ouvre le profil du compte, puis Partager → Copier le lien.</td><td>tiktok.com/@nomducompte</td><td>Non</td></tr>
+            <tr><td>Instagram</td><td>Ouvre le profil, puis ••• → Copier l’URL du profil.</td><td>instagram.com/nomducompte</td><td>Compte Instagram secondaire (voir plus bas)</td></tr>
+            <tr><td>bfmtv.com</td><td>Ouvre la rubrique qui liste les vidéos, par exemple la page Marseille.</td><td>bfmtv.com/marseille/</td><td>Non</td></tr>
+            <tr><td>Facebook, X</td><td>Pas de surveillance automatique possible.</td><td>—</td><td>Ajout par lien uniquement</td></tr>
+          </tbody>
+        </table>
+        <p className="note">Sur téléphone, tu peux aussi taper directement « @nomducompte » : un menu te demande alors la plateforme.</p>
+      </details>
+
+      <details>
+        <summary>Ajouter une vidéo précise</summary>
+        <p>Dans <Go to="library">Mes tournages</Go>, colle le lien de la vidéo dans « Ajouter une vidéo par son lien ». Ça marche pour YouTube, TikTok, Instagram, Facebook, X et bfmtv.com. La vidéo est téléchargée au prochain passage et rangée directement dans tes tournages validés.</p>
+      </details>
+
+      <details>
+        <summary>Visage et voix</summary>
+        <p>Dans <Go to="me">Visage et voix</Go> :</p>
+        <ul>
+          <li>ajoute 5 à 10 photos nettes de ton visage, sous des angles et des éclairages variés ;</li>
+          <li>ajoute quelques extraits de ta voix de 30 à 60 secondes, sans musique, ou enregistre-toi directement dans l’app.</li>
+        </ul>
+        <p>Sans ces références, seul ton nom est cherché.</p>
+      </details>
+
+      <details>
+        <summary>Régler la détection</summary>
+        <p>Dans <Go to="settings">Réglages</Go> :</p>
+        <ul>
+          <li><strong>Ton nom et ses variantes</strong> : ajoute les orthographes qu’une transcription pourrait produire.</li>
+          <li><strong>Ressemblance minimale</strong> : à 70 %, c’est équilibré. Monte-la si trop de vidéos sans toi sont retenues, baisse-la si tu en rates.</li>
+          <li><strong>Image analysée toutes les X secondes</strong> : 1 seconde est plus précis, mais plus lent.</li>
+          <li><strong>Qualité enregistrée</strong> : jusqu’à 4K, ou 1080p pour prendre moins de place.</li>
+        </ul>
+      </details>
+
+      <details>
+        <summary>Suivre les analyses</summary>
+        <p>L’onglet <Go to="history">Analyses</Go> montre la progression en direct, puis chaque vidéo analysée avec ses scores (nom, visage, voix) et la décision prise. Une vidéo « Sous le seuil » a été vue, mais n’a pas été jugée assez ressemblante.</p>
+        <p>Pour lancer une analyse sans attendre : sur GitHub, ouvre le repo <strong>mes-reportages</strong>, onglet Actions, « Veille reportages », puis « Run workflow ».</p>
+      </details>
+
+      <details>
+        <summary>Valider et télécharger</summary>
+        <ul>
+          <li><Go to="pending">À vérifier</Go> : les nouvelles détections. « Valider » les garde, « Écarter » supprime le fichier.</li>
+          <li><Go to="library">Mes tournages</Go> : toutes tes vidéos par année, avec « Télécharger en 4K / 1080p » et l’export de la liste en Excel.</li>
+        </ul>
+      </details>
+
+      <details>
+        <summary>Notifications et installation</summary>
+        <ol>
+          <li>Installe l’app. Sur iPhone : Safari, bouton Partager, puis « Sur l’écran d’accueil ». Sur Android : Chrome, menu, puis « Installer l’application ».</li>
+          <li>Ouvre l’app depuis l’icône.</li>
+          <li>Va dans Réglages, puis « Activer les notifications ».</li>
+        </ol>
+      </details>
+
+      <details>
+        <summary>Si une plateforme est bloquée</summary>
+        <p>Réglages → Plateformes indique l’état de chaque réseau après chaque passage.</p>
+        <ul>
+          <li><strong>YouTube bloqué</strong> : les cookies du compte Google secondaire ont expiré.
+            <ol>
+              <li>Ouvre le profil Chrome « Reportages » et va sur youtube.com.</li>
+              <li>Extension Get cookies.txt LOCALLY → « Export ».</li>
+              <li>Sur GitHub, repo mes-reportages → Settings → Secrets and variables → Actions → <code>YT_COOKIES</code> → Update, puis colle le contenu du fichier.</li>
+            </ol>
+          </li>
+          <li><strong>Mettre en place Instagram</strong> :
+            <ol>
+              <li>Crée un compte Instagram secondaire (inutile de suivre les pages).</li>
+              <li>Connecte-toi avec sur instagram.com, depuis le profil Chrome « Reportages ».</li>
+              <li>Extension Get cookies.txt LOCALLY → « Copy », puis récupère la valeur de la ligne <code>sessionid</code>.</li>
+              <li>Crée deux secrets GitHub : <code>IG_SESSIONID</code> (cette valeur) et <code>IG_USERNAME</code> (le nom du compte).</li>
+            </ol>
+          </li>
+        </ul>
+      </details>
+    </article>
   )
 }
