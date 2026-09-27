@@ -1,0 +1,25 @@
+name: Diag YouTube
+on:
+  workflow_dispatch:
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -q -U yt-dlp
+      - env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          printf '%s' "$YT_COOKIES" > /tmp/c.txt
+          VID=$(yt-dlp --cookies /tmp/c.txt --flat-playlist --playlist-end 1 --print id \
+                --extractor-args "youtubetab:skip=authcheck" \
+                "https://www.youtube.com/@BFM-Marseille/videos")
+          echo "=== vidéo test : $VID"
+          for C in mweb android ios web_safari tv web; do
+            echo "===== client $C"
+            yt-dlp --cookies /tmp/c.txt --extractor-args "youtube:player_client=$C" \
+              --list-formats "https://www.youtube.com/watch?v=$VID" 2>&1 | grep -E "video only|audio only|mp4|Requested|ERROR|available|sign in|reload" | head -8 || true
+          done
