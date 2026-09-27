@@ -785,15 +785,18 @@ def main():
             "instagram": ("off", "Session Instagram non configurée" if not IG_SESSIONID
                           else "Aucun compte dans les réglages")}
 
+    def write_platforms():
+        now = datetime.now(timezone.utc).isoformat()
+        db.update("data/platforms.json", {}, lambda _: {k: {"status": st, "detail": d, "updated_at": now}
+                                                         for k, (st, d) in plat.items()},
+                  "veille : état des plateformes")
+
     def finish(status=None):
         shutil.rmtree(tmp, ignore_errors=True)
         PROGRESS.update(phase="Terminé", current=None)
         flush_progress(force=True)
         now = datetime.now(timezone.utc).isoformat()
-        flush_seen()
-        db.update("data/platforms.json", {}, lambda _: {k: {"status": st, "detail": d, "updated_at": now}
-                                                         for k, (st, d) in plat.items()},
-                  "veille : état des plateformes")
+        write_platforms()
         done = {"finished_at": now, "checked": checked, "found": found,
                 "status": status or ("ok" if not errors else "error"),
                 "errors": "\n".join(errors[:40]) or None}
@@ -870,6 +873,7 @@ def main():
     todo = [c for c in uniq if c["id"] not in SEEN_SET]
     log(f"{len(todo)} nouvelles vidéos à analyser")
     PROGRESS.update(phase="Analyse", total=len(todo), listed=len(uniq), done=0)
+    write_platforms()
     flush_progress(force=True)
 
     blocked = set()
@@ -889,10 +893,14 @@ def main():
             checked += 1
         except Exception as e:
             msg = str(e).splitlines()[0][:250]
-            if any(k in msg for k in ("Sign in to confirm", "429", "login required", "rate-limit", "Please wait a few minutes", "checkpoint")):
+            if any(k in msg for k in ("Sign in to confirm", "429", "login required", "rate-limit", "Please wait a few minutes", "checkpoint",
+                                 "needs to be reloaded", "cookies are no longer valid", "not a bot")):
                 blocked.add(v["source"])
                 if v["source"] in plat:
-                    plat[v["source"]] = ("error", "Bloqué par la plateforme pendant l'analyse")
+                    hint = (" : cookies refusés, à exporter de nouveau (voir le mode d'emploi)"
+                            if v["source"] == "youtube" else "")
+                    plat[v["source"]] = ("error", "Bloqué par la plateforme pendant l'analyse" + hint)
+                    write_platforms()
                 errors.append(f"{v['source']} bloque les requêtes : voir « Si une plateforme bloque » dans le README.")
             else:
                 errors.append(f"{v['url']} : {msg}")

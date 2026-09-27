@@ -357,9 +357,9 @@ button.mini { border: 0; padding: 0; cursor: pointer; display: block; width: 100
 .acct.link { color: var(--gris); }
 .plat-how { margin: 4px 0 2px; font-size: 0.9rem; color: var(--gris); }
 .plat-state { margin: 0; font-size: 0.85rem; }
-.plat.ok .plat-state { color: var(--regie); }
-.plat.error .plat-state { color: var(--tally); }
-.plat.off .plat-state, .plat.wait .plat-state, .plat.link .plat-state { color: var(--gris); }
+.plat.st-ok .plat-state { color: var(--regie); }
+.plat.st-error .plat-state { color: var(--tally); }
+.plat.st-off .plat-state, .plat.st-wait .plat-state, .plat.st-link .plat-state { color: var(--gris); }
 
 /* Analyse en direct */
 .live-banner {

@@ -782,7 +782,7 @@ const PLATFORM_INFO = [
 
 const STATUS_LABEL = { ok: 'Fonctionne', error: 'Problème', off: 'Non configuré' }
 const HELP = {
-  youtube: 'Bloqué tant que les cookies du compte Google secondaire ne sont pas ajoutés.',
+  youtube: 'Refais l’export des cookies du compte Google secondaire en suivant la méthode du mode d’emploi (fenêtre de navigation privée).',
   instagram: 'Bloqué ou non configuré tant que la session du compte Instagram secondaire n’est pas ajoutée.',
 }
 
@@ -795,7 +795,7 @@ function Platforms({ rows = {} }) {
           const r = rows[p.key]
           const st = r?.status || (p.account === 'Par lien uniquement' ? 'link' : 'wait')
           return (
-            <li key={p.key} className={`plat ${st}`}>
+            <li key={p.key} className={`plat st-${st}`}>
               <div className="plat-head">
                 <strong>{p.name}</strong>
                 <span className={`acct ${p.account === 'Sans compte' ? 'free' : p.account.startsWith('Compte') ? 'need' : 'link'}`}>{p.account}</span>
@@ -1137,11 +1137,14 @@ function Guide({ goTab }) {
         <summary>Si une plateforme est bloquée</summary>
         <p>Réglages → Plateformes indique l’état de chaque réseau après chaque passage.</p>
         <ul>
-          <li><strong>YouTube bloqué</strong> : les cookies du compte Google secondaire ont expiré.
+          <li><strong>YouTube bloqué</strong> : les cookies du compte Google secondaire ont expiré ou ont été renouvelés par le navigateur. Il faut les exporter depuis une fenêtre privée, qu’on ferme aussitôt, pour que YouTube ne les renouvelle plus.
             <ol>
-              <li>Ouvre le profil Chrome « Reportages » et va sur youtube.com.</li>
-              <li>Extension Get cookies.txt LOCALLY → « Export ».</li>
-              <li>Sur GitHub, repo mes-reportages → Settings → Secrets and variables → Actions → <code>YT_COOKIES</code> → Update, puis colle le contenu du fichier.</li>
+              <li>Dans le profil Chrome « Reportages », ouvre chrome://extensions, puis Get cookies.txt LOCALLY → Détails, et active « Autoriser en navigation privée ».</li>
+              <li>Ouvre une fenêtre de navigation privée (Ctrl + Maj + N) et connecte-toi à youtube.com avec le compte secondaire.</li>
+              <li>Dans ce même onglet, va à l’adresse youtube.com/robots.txt.</li>
+              <li>Clique sur l’extension, puis « Export ».</li>
+              <li>Ferme tout de suite la fenêtre privée, sans te déconnecter.</li>
+              <li>Envoie le fichier, ou colle son contenu dans GitHub : repo mes-reportages → Settings → Secrets and variables → Actions → <code>YT_COOKIES</code> → Update.</li>
             </ol>
           </li>
           <li><strong>Mettre en place Instagram</strong> :
