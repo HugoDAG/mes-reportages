@@ -903,6 +903,10 @@ def main():
         except Exception as e:
             msg = str(e).splitlines()[0][:250]
             log("Échec analyse:", v.get("source"), msg[:300])
+            try:
+                db.update("data/diag.json", [], lambda l: (l + [{"src": v.get("source"), "msg": str(e).splitlines()[0][:400]}])[-20:], "diag")
+            except Exception:
+                pass
             if any(k in msg for k in ("Sign in to confirm", "429", "login required", "rate-limit", "Please wait a few minutes", "checkpoint",
                                  "needs to be reloaded", "cookies are no longer valid", "not a bot")):
                 blocked.add(v["source"])
