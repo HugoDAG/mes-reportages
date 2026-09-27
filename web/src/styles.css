@@ -445,3 +445,5 @@ button.mini { border: 0; padding: 0; cursor: pointer; display: block; width: 100
 .guide-table th, .guide-table td { text-align: left; vertical-align: top; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--ligne); }
 .guide-table th { color: var(--gris); font-weight: 600; }
 .guide-table td:first-child { font-weight: 600; white-space: nowrap; }
+.run-btn { margin-top: 10px; }
+.run-btn p { margin: 8px 0 0; }

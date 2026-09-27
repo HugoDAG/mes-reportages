@@ -112,9 +112,10 @@ function Login({ onIn }) {
 function Dashboard({ data, setData, reload, onOut }) {
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'library')
   const [playing, setPlaying] = useState(null)
-  const { videos, runs, settings, platforms, queue, analyses } = data
+  const { videos, runs, settings, platforms, queue, analyses, gh_run: ghRun } = data
   const load = reload
-  const running = runs[0]?.status === 'running'
+  // « en cours » dès que GitHub a démarré la veille, même avant que le moteur n'écrive sa progression
+  const running = runs[0]?.status === 'running' || (ghRun && ghRun.status !== 'completed')
   // pendant une veille, on rafraîchit toutes les 30 s pour suivre l'analyse en direct
   useEffect(() => {
     if (!running) return
@@ -151,7 +152,9 @@ function Dashboard({ data, setData, reload, onOut }) {
       {running && tab !== 'history' && (
         <button className="live-banner" onClick={() => setTab('history')}>
           <span className="pulse" aria-hidden />
-          Analyse en cours : {runs[0].done ?? 0} / {runs[0].total ?? '…'} vidéos
+          {runs[0]?.status === 'running'
+            ? <>Analyse en cours : {runs[0].done ?? 0} / {runs[0].total ?? '…'} vidéos</>
+            : <>Analyse en préparation…</>}
         </button>
       )}
 
@@ -179,7 +182,7 @@ function Dashboard({ data, setData, reload, onOut }) {
           tab="rejected" names={names} onStatus={setStatus} goTab={setTab} onPlay={setPlaying} />
       )}
       {tab === 'me' && <References settings={settings} />}
-      {tab === 'history' && <><LiveRun run={runs[0]} /><AnalysisLog items={analyses || []} /><History runs={runs} /></>}
+      {tab === 'history' && <><LiveRun run={runs[0]} ghRun={ghRun} onStarted={load} goGuide={() => setTab('guide')} /><AnalysisLog items={analyses || []} /><History runs={runs} /></>}
       {tab === 'settings' && settings && <><Notifications /><Platforms rows={platforms} /><SourcesManager settings={settings} onSaved={load} goGuide={() => setTab('guide')} /><Settings initial={settings} onSaved={load} /></>}
       {tab === 'guide' && <Guide goTab={setTab} />}
       {playing && <Player v={playing} onClose={() => setPlaying(null)} />}
@@ -833,14 +836,54 @@ const ago = (d) => {
   return `il y a ${Math.round(s / 3600)} h`
 }
 
-function LiveRun({ run }) {
-  if (!run || run.status !== 'running') {
-    return run ? (
-      <div className="live idle">
-        <p><strong>Aucune analyse en cours.</strong> Dernier passage terminé {ago(run.finished_at || run.started_at)} : {run.checked} vidéos analysées, {run.found} retenue{run.found > 1 ? 's' : ''}.</p>
-        <p className="note">Prochain passage automatique sous 2 jours. Pour en lancer un tout de suite : repo GitHub mes-reportages, onglet Actions, « Veille reportages », « Run workflow ».</p>
+function RunButton({ onStarted, goGuide }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const start = async () => {
+    setBusy(true); setMsg(null)
+    try {
+      await api('/api/run', { method: 'POST' })
+      setMsg({ ok: true, text: 'Analyse lancée. Elle démarre dans 1 à 2 minutes, le temps que les outils s’installent.' })
+      setTimeout(onStarted, 15000)
+    } catch (e) {
+      setMsg({ ok: false, text: e.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="run-btn">
+      <button className="btn primary" onClick={start} disabled={busy}>{busy ? 'Lancement…' : 'Lancer une analyse maintenant'}</button>
+      {msg && <p className={msg.ok ? 'saved' : 'error'} role="status">{msg.text}
+        {!msg.ok && msg.text.includes('mode d’emploi') && <> <button className="link" onClick={goGuide}>Ouvrir le mode d’emploi</button></>}</p>}
+    </div>
+  )
+}
+
+function LiveRun({ run, ghRun, onStarted, goGuide }) {
+  const preparing = ghRun && ghRun.status !== 'completed' && run?.status !== 'running'
+  if (preparing) {
+    return (
+      <div className="live" aria-live="polite">
+        <div className="live-head">
+          <span className="pulse" aria-hidden />
+          <strong>Analyse en préparation</strong>
+          <span className="note">lancée {ago(ghRun.created_at)}</span>
+        </div>
+        <p className="note">Installation des outils d’analyse (visage, voix, transcription) : 2 à 5 minutes. La progression s’affichera ici ensuite.</p>
       </div>
-    ) : null
+    )
+  }
+  if (!run || run.status !== 'running') {
+    return (
+      <div className="live idle">
+        {run
+          ? <p><strong>Aucune analyse en cours.</strong> Dernier passage terminé {ago(run.finished_at || run.started_at)} : {run.checked} vidéos analysées, {run.found} retenue{run.found > 1 ? 's' : ''}.</p>
+          : <p><strong>Aucune analyse pour l’instant.</strong></p>}
+        <p className="note">Une analyse automatique a lieu tous les deux jours. Tu peux aussi en lancer une tout de suite.</p>
+        <RunButton onStarted={onStarted} goGuide={goGuide} />
+      </div>
+    )
   }
   const total = run.total || 0
   const done = run.done || 0
@@ -1113,7 +1156,8 @@ function Guide({ goTab }) {
       <details>
         <summary>Suivre les analyses</summary>
         <p>L’onglet <Go to="history">Analyses</Go> montre la progression en direct, puis chaque vidéo analysée avec ses scores (nom, visage, voix) et la décision prise. Une vidéo « Sous le seuil » a été vue, mais n’a pas été jugée assez ressemblante.</p>
-        <p>Pour lancer une analyse sans attendre : sur GitHub, ouvre le repo <strong>mes-reportages</strong>, onglet Actions, « Veille reportages », puis « Run workflow ».</p>
+        <p>Pour lancer une analyse sans attendre, clique sur « Lancer une analyse maintenant » dans l’onglet Analyses.</p>
+        <p className="note">Si l’app répond que le token n’a pas le droit de lancer une analyse : sur GitHub, va dans Settings → Developer settings → Fine-grained tokens, ouvre « stockage reportages » puis « Edit ». Dans « Repository access », ajoute <strong>mes-reportages</strong>. Dans « Permissions », mets <strong>Actions : Read and write</strong>. Enregistre : il n’y a rien d’autre à changer.</p>
       </details>
 
       <details>
