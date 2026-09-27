@@ -115,7 +115,7 @@ def ydl_opts(**extra):
          # cookies d'un seul compte : on saute la vérification multi-comptes de yt-dlp,
          # et on privilégie les clients YouTube qui marchent avec une session simple
          "extractor_args": {"youtubetab": {"skip": ["authcheck"]},
-                            "youtube": {"player_client": ["mweb", "android_vr"]}}}
+                            "youtube": {"player_client": ["mweb"]}}}
     if COOKIES_FILE and os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         o["cookiefile"] = COOKIES_FILE
     o.update(extra)
@@ -521,16 +521,38 @@ def article_text(url: str) -> str:
 
 
 def download(url: str, out_base: str, max_height: int) -> str:
-    """Meilleure qualité jusqu'à max_height, en privilégiant le H.264 (lisible partout)."""
-    opts = ydl_opts(format="bv*+ba/b", merge_output_format="mp4",
-                    format_sort=[f"res:{max_height}", "vcodec:h264", "acodec:m4a"],
-                    outtmpl=out_base + ".%(ext)s")
-    with yt_dlp.YoutubeDL(opts) as y:
-        y.download([url])
-    files = [f for f in glob.glob(out_base + ".*") if not f.endswith((".part", ".ytdl"))]
-    if not files:
-        raise RuntimeError("téléchargement sans fichier en sortie")
-    return files[0]
+    """Meilleure qualité jusqu'a max_height, en privilegiant le H.264 (lisible partout)."""
+    is_yt = ("youtube.com" in url) or ("youtu.be" in url)
+
+    def attempt(fmt: str):
+        opts = ydl_opts(format=fmt, merge_output_format="mp4",
+                        format_sort=[f"res:{max_height}", "vcodec:h264", "acodec:m4a"],
+                        outtmpl=out_base + ".%(ext)s")
+        if is_yt:
+            # les clients Android/iOS renvoient des URLs de flux directes, sans PO token
+            opts["extractor_args"] = {"youtube": {"player_client": ["android", "ios", "mweb"]},
+                                      "youtubetab": {"skip": ["authcheck"]}}
+        with yt_dlp.YoutubeDL(opts) as y:
+            y.download([url])
+        got = [f for f in glob.glob(out_base + ".*") if not f.endswith((".part", ".ytdl"))]
+        return got[0] if got else None
+
+    # du plus exigeant (qualite voulue) au plus permissif (un seul fichier deja multiplexe)
+    formats = [f"bv*[height<={max_height}]+ba/b[height<={max_height}]",
+               "bv*+ba/b", "best"]
+    last = None
+    for fmt in formats:
+        try:
+            f = attempt(fmt)
+            if f:
+                return f
+        except Exception as e:
+            last = e
+            if "format is not available" not in str(e):
+                raise
+    if last:
+        raise last
+    raise RuntimeError("telechargement sans fichier en sortie")
 
 
 def analyse(v: dict, s: dict, names: list[str], face, voice, tmp: str) -> dict:
