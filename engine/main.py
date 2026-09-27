@@ -244,7 +244,7 @@ def list_rss(feed: str):
                "text": f"{e.get('title', '')} {e.get('summary', '')}", "published_at": pub}
 
 
-VIDEO_LINK = re.compile(r"(_VN\d+|/videos?/|/replay)", re.I)
+VIDEO_LINK = re.compile(r"_VN-?\d{8,}", re.I)  # pages vidéo BFM : ..._VN-202609250733.html
 
 
 def list_page(page: str):
