@@ -111,7 +111,11 @@ def to_pct(sim: float, low: float, high: float) -> int:
 
 def ydl_opts(**extra):
     o = {"quiet": True, "no_warnings": True, "noprogress": True,
-         "http_headers": UA, "retries": 3, "socket_timeout": 30}
+         "http_headers": UA, "retries": 3, "socket_timeout": 30,
+         # cookies d'un seul compte : on saute la vérification multi-comptes de yt-dlp,
+         # et on privilégie les clients YouTube qui marchent avec une session simple
+         "extractor_args": {"youtubetab": {"skip": ["authcheck"]},
+                            "youtube": {"player_client": ["web", "mweb"]}}}
     if COOKIES_FILE and os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         o["cookiefile"] = COOKIES_FILE
     o.update(extra)
