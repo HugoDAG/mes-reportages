@@ -115,8 +115,7 @@ def ydl_opts(**extra):
          # cookies d'un seul compte : on saute la vérification multi-comptes de yt-dlp,
          # et on privilégie les clients YouTube qui marchent avec une session simple
          "extractor_args": {"youtubetab": {"skip": ["authcheck"]},
-                            "youtube": {"player_client": ["default", "web"],
-                                        "player_skip": ["configs"]}}}
+                            "youtube": {"player_client": ["mweb", "android_vr"]}}}
     if COOKIES_FILE and os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 0:
         o["cookiefile"] = COOKIES_FILE
     o.update(extra)
