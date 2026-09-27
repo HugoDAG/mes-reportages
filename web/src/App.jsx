@@ -1,7 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { supabase } from './supabase'
 
-const BUCKET = 'references'
+/* ---------------------------------------------------------------- serveur */
+
+class AuthError extends Error {}
+
+async function api(path, { method = 'GET', body } = {}) {
+  const r = await fetch(path, {
+    method,
+    credentials: 'same-origin',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const data = await r.json().catch(() => ({}))
+  if (r.status === 401) throw new AuthError(data.error || 'Session expirée.')
+  if (!r.ok) throw new Error(data.error || `Erreur ${r.status}`)
+  return data
+}
+const act = (body) => api('/api/action', { method: 'POST', body })
+
 
 const REASONS = {
   text: 'Nom dans le titre, la description ou l’article',
@@ -15,14 +31,9 @@ const SOURCES = {
   x: 'X', bfmtv: 'bfmtv.com', manual: 'Lien ajouté',
 }
 
-// Les fichiers sont servis par /api/download, qui vérifie ta session avant de rediriger vers le stockage
-async function fileUrl(id) {
-  const { data } = await supabase.auth.getSession()
-  return `/api/download?id=${id}&t=${encodeURIComponent(data.session?.access_token || '')}`
-}
-async function downloadFile(id) {
-  window.location.href = await fileUrl(id)
-}
+// Les vidéos sont servies par /api/download, qui vérifie la session avant de rediriger vers le stockage
+const fileUrl = (id) => `/api/download?id=${id}`
+const downloadFile = (id) => { window.location.href = fileUrl(id) }
 const qLabel = (h) => (!h ? '' : h >= 2160 ? '4K' : h >= 1440 ? '1440p' : `${h}p`)
 const fmtSize = (b) => (!b ? '' : b > 1e9 ? `${(b / 1e9).toFixed(1)} Go` : `${Math.round(b / 1e6)} Mo`)
 
@@ -42,61 +53,66 @@ const fmtDateTime = (d) =>
 const fmtDur = (s) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '')
 
 export default function App() {
-  const [session, setSession] = useState(null)
-  const [ready, setReady] = useState(false)
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true) })
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
-    return () => data.subscription.unsubscribe()
-  }, [])
-  if (!ready) return null
-  return session ? <Dashboard /> : <Login />
+  const [state, setState] = useState('loading') // loading | in | out
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+
+  const load = async () => {
+    try {
+      const d = await api('/api/data')
+      d.videos.sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')))
+      setData(d)
+      setError('')
+      setState('in')
+    } catch (e) {
+      if (e instanceof AuthError) setState('out')
+      else { setError(e.message); setState((s) => (s === 'loading' ? 'error' : s)) }
+    }
+  }
+  useEffect(() => { load() }, [])
+
+  if (state === 'loading') return null
+  if (state === 'out') return <Login onIn={load} />
+  if (state === 'error') {
+    return <main className="login"><h1 className="brand">Mes reportages</h1><p className="error">{error}</p>
+      <button className="btn" onClick={load}>Réessayer</button></main>
+  }
+  return <Dashboard data={data} setData={setData} reload={load} onOut={() => setState('out')} />
 }
 
-function Login() {
-  const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
+function Login({ onIn }) {
+  const [code, setCode] = useState('')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
   const send = async () => {
-    setError('')
-    const { error } = await supabase.auth.signInWithOtp({
-      email, options: { emailRedirectTo: window.location.origin, shouldCreateUser: false },
-    })
-    if (error) setError('Envoi impossible. Vérifie que cette adresse est celle du compte créé dans Supabase.')
-    else setSent(true)
+    setError(''); setBusy(true)
+    try {
+      await api('/api/login', { method: 'POST', body: { code } })
+      await onIn()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
   }
   return (
     <main className="login">
       <h1 className="brand">Mes reportages</h1>
-      {sent ? <p>Lien de connexion envoyé à {email}. Ouvre-le depuis cet appareil.</p> : (
-        <>
-          <label htmlFor="email">Adresse e-mail</label>
-          <input id="email" type="email" value={email} autoComplete="email"
-            onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} />
-          <button className="btn primary" onClick={send} disabled={!email}>Recevoir le lien de connexion</button>
-          {error && <p className="error">{error}</p>}
-        </>
-      )}
+      <label htmlFor="code">Code d’accès</label>
+      <input id="code" value={code} autoComplete="current-password" autoCapitalize="characters"
+        onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} />
+      <button className="btn primary" onClick={send} disabled={!code || busy}>{busy ? 'Connexion…' : 'Se connecter'}</button>
+      {error && <p className="error">{error}</p>}
+      <p className="note">Tu restes connecté 6 mois sur cet appareil.</p>
     </main>
   )
 }
 
-function Dashboard() {
-  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'pending')
+function Dashboard({ data, setData, reload, onOut }) {
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'library')
   const [playing, setPlaying] = useState(null)
-  const [videos, setVideos] = useState([])
-  const [runs, setRuns] = useState([])
-  const [settings, setSettings] = useState(null)
-
-  const load = async () => {
-    const [v, r, s] = await Promise.all([
-      supabase.from('videos').select('*').order('published_at', { ascending: false, nullsFirst: false }),
-      supabase.from('runs').select('*').order('started_at', { ascending: false }).limit(30),
-      supabase.from('settings').select('*').eq('id', 1).single(),
-    ])
-    setVideos(v.data || []); setRuns(r.data || []); setSettings(s.data)
-  }
-  useEffect(() => { load() }, [])
+  const { videos, runs, settings, platforms, queue } = data
+  const load = reload
 
   const counts = useMemo(() => {
     const c = {}
@@ -105,8 +121,8 @@ function Dashboard() {
   }, [videos])
 
   const setStatus = async (id, status) => {
-    setVideos((vs) => vs.map((v) => (v.id === id ? { ...v, status } : v)))
-    await supabase.from('videos').update({ status }).eq('id', id)
+    setData((d) => ({ ...d, videos: d.videos.map((v) => (v.id === id ? { ...v, status } : v)) }))
+    try { await act({ type: 'status', id, status }) } catch (e) { alert(`Modification non enregistrée : ${e.message}`); reload() }
   }
 
   const lastRun = runs[0]
@@ -136,12 +152,12 @@ function Dashboard() {
 
       {tab === 'pending' && (
         <>
-          <AddLink />
+          <AddLink queue={queue} onAdded={load} />
           <VideoList videos={videos.filter((v) => v.status === 'pending').sort((a, b) => (b.score || 0) - (a.score || 0))}
             tab="pending" names={names} onStatus={setStatus} goTab={setTab} onPlay={setPlaying} />
         </>
       )}
-      {tab === 'library' && <AddLink />}
+      {tab === 'library' && <AddLink queue={queue} onAdded={load} />}
       {tab === 'library' && <Library videos={videos.filter((v) => v.status !== 'rejected')} onStatus={setStatus} onPlay={setPlaying} />}
       {tab === 'rejected' && (
         <VideoList videos={videos.filter((v) => v.status === 'rejected')}
@@ -149,11 +165,11 @@ function Dashboard() {
       )}
       {tab === 'me' && <References settings={settings} />}
       {tab === 'history' && <History runs={runs} />}
-      {tab === 'settings' && settings && <><Notifications /><Platforms /><Settings initial={settings} onSaved={load} /></>}
+      {tab === 'settings' && settings && <><Notifications /><Platforms rows={platforms} /><Settings initial={settings} onSaved={load} /></>}
       {playing && <Player v={playing} onClose={() => setPlaying(null)} />}
 
       <footer className="foot">
-        <button className="link" onClick={() => supabase.auth.signOut()}>Se déconnecter</button>
+        <button className="link" onClick={async () => { await api('/api/logout', { method: 'POST' }); onOut() }}>Se déconnecter</button>
       </footer>
     </div>
   )
@@ -258,9 +274,14 @@ function AddLink() {
   const add = async () => {
     setMsg('')
     if (!/^https?:\/\//.test(url.trim())) { setMsg('Colle un lien complet, commençant par https://'); return }
-    const { error } = await supabase.from('queue').insert({ url: url.trim() })
-    setMsg(error ? `Ajout impossible : ${error.message}` : 'Lien ajouté. La vidéo sera téléchargée au prochain passage et rangée dans Mes tournages.')
-    if (!error) setUrl('')
+    try {
+      await act({ type: 'queue', url: url.trim() })
+      setMsg('Lien ajouté. La vidéo sera téléchargée au prochain passage et rangée dans Mes tournages.')
+      setUrl('')
+      onAdded?.()
+    } catch (e) {
+      setMsg(`Ajout impossible : ${e.message}`)
+    }
   }
   return (
     <div className="addlink">
@@ -394,27 +415,59 @@ function Library({ videos, onStatus, onPlay }) {
 
 /* ---------------------------------------------------------------- références */
 
+const MAX_UPLOAD = 3 * 1024 * 1024 // limite d'envoi des fonctions Vercel (après encodage)
+
+const toBase64 = (blob) => new Promise((ok, ko) => {
+  const r = new FileReader()
+  r.onload = () => ok(String(r.result).split(',')[1])
+  r.onerror = ko
+  r.readAsDataURL(blob)
+})
+
+// Réduit une photo à 1600 px de large en JPEG : plus léger, aussi efficace pour la reconnaissance
+async function shrinkImage(file) {
+  const img = await createImageBitmap(file).catch(() => null)
+  if (!img) return file
+  const scale = Math.min(1, 1600 / Math.max(img.width, img.height))
+  const c = document.createElement('canvas')
+  c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale)
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+  const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.88))
+  return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' })
+}
+
 function useRefFiles(kind) {
   const [files, setFiles] = useState([])
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
   const load = async () => {
-    const { data } = await supabase.storage.from(BUCKET).list(kind, { sortBy: { column: 'created_at', order: 'desc' } })
-    const list = (data || []).filter((f) => f.name && !f.name.startsWith('.'))
-    if (!list.length) { setFiles([]); return }
-    const { data: signed } = await supabase.storage.from(BUCKET)
-      .createSignedUrls(list.map((f) => `${kind}/${f.name}`), 3600)
-    setFiles(list.map((f, i) => ({ name: f.name, url: signed?.[i]?.signedUrl })))
+    try { setFiles(await api(`/api/refs?kind=${kind}`)) } catch (e) { setMsg(e.message) }
   }
   useEffect(() => { load() }, [])
   const upload = async (fileList) => {
-    for (const f of fileList) {
-      const clean = f.name.normalize('NFD').replace(/[^\w.-]+/g, '_')
-      await supabase.storage.from(BUCKET).upload(`${kind}/${Date.now()}-${clean}`, f, { contentType: f.type })
+    setMsg(''); setBusy(true)
+    for (let f of fileList) {
+      if (kind === 'face') f = await shrinkImage(f)
+      if (f.size > MAX_UPLOAD) {
+        setMsg(`« ${f.name} » dépasse 3 Mo. Coupe un extrait plus court (30 à 60 secondes suffisent).`)
+        continue
+      }
+      try {
+        await api('/api/refs', { method: 'POST', body: { kind, name: f.name, data: await toBase64(f) } })
+      } catch (e) {
+        setMsg(`Envoi de « ${f.name} » impossible : ${e.message}`)
+      }
     }
+    setBusy(false)
     load()
   }
-  const remove = async (name) => { await supabase.storage.from(BUCKET).remove([`${kind}/${name}`]); load() }
-  return { files, upload, remove }
+  const remove = async (path) => {
+    try { await api(`/api/refs?path=${encodeURIComponent(path)}`, { method: 'DELETE' }) } catch (e) { setMsg(e.message) }
+    load()
+  }
+  return { files, upload, remove, msg, busy }
 }
+const refUrl = (path) => `/api/refs?path=${encodeURIComponent(path)}`
 
 function Recorder({ onDone }) {
   const [rec, setRec] = useState(null)
@@ -473,17 +526,19 @@ function References({ settings }) {
         <ul className="photos">
           {face.files.map((f) => (
             <li key={f.name}>
-              {f.url && <img src={f.url} alt="Photo de référence" />}
-              <button className="link" onClick={() => face.remove(f.name)}>Supprimer</button>
+              <img src={refUrl(f.path)} alt="Photo de référence" loading="lazy" />
+              <button className="link" onClick={() => face.remove(f.path)}>Supprimer</button>
             </li>
           ))}
         </ul>
-        {!face.files.length && <p className="note">Aucune photo pour l’instant.</p>}
+        {face.busy && <p className="note" role="status">Envoi en cours…</p>}
+        {face.msg && <p className="error">{face.msg}</p>}
+        {!face.files.length && !face.busy && <p className="note">Aucune photo pour l’instant.</p>}
       </section>
 
       <section className="ref-block">
         <h2 className="h2">Ta voix</h2>
-        <p className="lead">Il faut 2 à 3 minutes de ta voix au total. Le plus efficace : des extraits de tes voix off (audio ou vidéo), sans musique ni autre voix. Tu peux aussi t’enregistrer ici, en lisant un texte comme au micro.</p>
+        <p className="lead">Il faut 2 à 3 minutes de ta voix au total. Le plus efficace : des extraits de tes voix off (audio ou vidéo), sans musique ni autre voix. Tu peux aussi t’enregistrer ici, en lisant un texte comme au micro. Chaque fichier doit faire moins de 3 Mo : plusieurs extraits de 30 à 60 secondes valent mieux qu’un long.</p>
         <div className="actions">
           <label className="btn upload">
             Ajouter des fichiers audio ou vidéo
@@ -494,12 +549,14 @@ function References({ settings }) {
         <ul className="voices">
           {voice.files.map((f) => (
             <li key={f.name}>
-              {f.url && <audio controls preload="none" src={f.url} />}
-              <button className="link" onClick={() => voice.remove(f.name)}>Supprimer</button>
+              <audio controls preload="none" src={refUrl(f.path)} />
+              <button className="link" onClick={() => voice.remove(f.path)}>Supprimer</button>
             </li>
           ))}
         </ul>
-        {!voice.files.length && <p className="note">Aucun extrait pour l’instant.</p>}
+        {voice.busy && <p className="note" role="status">Envoi en cours…</p>}
+        {voice.msg && <p className="error">{voice.msg}</p>}
+        {!voice.files.length && !voice.busy && <p className="note">Aucun extrait pour l’instant.</p>}
       </section>
 
       {settings && (!settings.face_enabled || !settings.voice_enabled) && (
@@ -546,17 +603,21 @@ function Settings({ initial, onSaved }) {
 
   const save = async () => {
     setMsg('')
-    const { error } = await supabase.from('settings').update({
+    const payload = {
       name_variants: toArr(f.names), youtube_channels: toArr(f.channels), tiktok_accounts: toArr(f.tiktok), instagram_accounts: toArr(f.instagram), max_quality: Number(f.max_quality) || 2160,
       pages: toArr(f.pages), rss_feeds: toArr(f.feeds),
       lookback: Number(f.lookback) || 200, max_duration_min: Number(f.max_duration_min) || 20,
       tail_seconds: Number(f.tail_seconds) || 60, frame_interval: Number(f.frame_interval) || 2,
       threshold: Number(f.threshold) || 70,
       whisper_enabled: f.whisper_enabled, face_enabled: f.face_enabled, voice_enabled: f.voice_enabled,
-      updated_at: new Date().toISOString(),
-    }).eq('id', 1)
-    setMsg(error ? `Enregistrement impossible : ${error.message}` : 'Réglages enregistrés. Ils s’appliquent au prochain passage.')
-    if (!error) onSaved()
+    }
+    try {
+      await act({ type: 'settings', settings: payload })
+      setMsg('Réglages enregistrés. Ils s’appliquent au prochain passage.')
+      onSaved()
+    } catch (e) {
+      setMsg(`Enregistrement impossible : ${e.message}`)
+    }
   }
 
   return (
@@ -632,8 +693,7 @@ function Settings({ initial, onSaved }) {
 /* ---------------------------------------------------------------- lecteur */
 
 function Player({ v, onClose }) {
-  const [src, setSrc] = useState(null)
-  useEffect(() => { fileUrl(v.file_id).then(setSrc) }, [v.file_id])
+  const src = fileUrl(v.file_id)
   useEffect(() => {
     const k = (e) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', k)
@@ -678,9 +738,8 @@ function Notifications() {
       const reg = await navigator.serviceWorker.ready
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToUint8(VAPID) })
       const json = sub.toJSON()
-      const { error } = await supabase.from('push_subscriptions')
-        .upsert({ endpoint: json.endpoint, subscription: json, user_agent: navigator.userAgent }, { onConflict: 'endpoint' })
-      setMsg(error ? `Enregistrement impossible : ${error.message}` : 'Notifications activées sur cet appareil.')
+      await act({ type: 'push', subscription: json, user_agent: navigator.userAgent })
+      setMsg('Notifications activées sur cet appareil.')
     } catch (e) {
       setMsg(`Activation impossible : ${e.message}`)
     }
@@ -719,15 +778,7 @@ const PLATFORM_INFO = [
 
 const STATUS_LABEL = { ok: 'Fonctionne', error: 'Problème', off: 'Non configuré' }
 
-function Platforms() {
-  const [rows, setRows] = useState({})
-  useEffect(() => {
-    supabase.from('platforms').select('*').then(({ data }) => {
-      const m = {}
-      ;(data || []).forEach((r) => { m[r.key] = r })
-      setRows(m)
-    })
-  }, [])
+function Platforms({ rows = {} }) {
   return (
     <fieldset className="platforms">
       <legend>Plateformes</legend>

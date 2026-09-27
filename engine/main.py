@@ -31,11 +31,9 @@ import requests
 import feedparser
 from bs4 import BeautifulSoup
 from rapidfuzz import fuzz
-from supabase import create_client
+from store import Store
 import yt_dlp
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 STORAGE_REPO = os.environ["STORAGE_REPO"]            # ex. HugoDAG/mes-tournages-stockage (privé)
 STORAGE_TOKEN = os.environ["STORAGE_TOKEN"]
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY")
@@ -50,7 +48,14 @@ MAX_TIME_MIN = int(os.environ.get("MAX_RUN_MINUTES", "300"))
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/126 Safari/537.36"}
 
-sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+db = Store(STORAGE_REPO, STORAGE_TOKEN)
+
+DEFAULT_SETTINGS = {
+    "name_variants": [], "youtube_channels": ["https://www.youtube.com/@BFM-Marseille", "https://www.youtube.com/@BFMTV"],
+    "tiktok_accounts": [], "instagram_accounts": [], "pages": ["https://www.bfmtv.com/marseille/"], "rss_feeds": [],
+    "lookback": 200, "max_duration_min": 20, "tail_seconds": 60, "frame_interval": 2, "threshold": 70,
+    "whisper_enabled": True, "face_enabled": True, "voice_enabled": True, "max_quality": 2160,
+}
 START = datetime.now(timezone.utc)
 
 
@@ -133,7 +138,8 @@ def notify(title: str, body: str, url: str = "/"):
     if not VAPID_PRIVATE_KEY:
         return
     from pywebpush import webpush, WebPushException
-    subs = sb.table("push_subscriptions").select("*").execute().data
+    subs, _ = db.read("data/push.json", [])
+    dead = set()
     for sub in subs:
         try:
             webpush(subscription_info=sub["subscription"],
@@ -142,11 +148,14 @@ def notify(title: str, body: str, url: str = "/"):
                     vapid_claims={"sub": VAPID_SUBJECT}, ttl=86400)
         except WebPushException as e:
             if e.response is not None and e.response.status_code in (404, 410):
-                sb.table("push_subscriptions").delete().eq("id", sub["id"]).execute()
+                dead.add(sub["endpoint"])
             else:
                 log("Notification impossible :", str(e)[:120])
         except Exception as e:
             log("Notification impossible :", str(e)[:120])
+    if dead:
+        db.update("data/push.json", [], lambda l: [x for x in l if x["endpoint"] not in dead],
+                  "notifications : abonnements expirés retirés")
 
 
 def ffmpeg(*args):
@@ -253,12 +262,34 @@ def list_page(page: str):
                "url": href, "title": title, "text": title}
 
 
-def already_seen(ids: list[str]) -> set[str]:
-    out = set()
-    for i in range(0, len(ids), 150):
-        r = sb.table("seen").select("id").in_("id", ids[i:i + 150]).execute()
-        out.update(x["id"] for x in r.data)
-    return out
+SEEN: list[str] = []
+SEEN_SET: set[str] = set()
+SEEN_DIRTY = [0]
+
+
+def load_seen():
+    global SEEN, SEEN_SET
+    SEEN, _ = db.read("data/seen.json", [])
+    SEEN_SET = set(SEEN)
+
+
+def mark_seen(vid: str, flush_every: int = 25):
+    if vid in SEEN_SET:
+        return
+    SEEN.append(vid)
+    SEEN_SET.add(vid)
+    SEEN_DIRTY[0] += 1
+    if SEEN_DIRTY[0] >= flush_every:
+        flush_seen()
+
+
+def flush_seen():
+    if not SEEN_DIRTY[0]:
+        return
+    keep = SEEN[-30000:]
+    db.update("data/seen.json", [], lambda old: list(dict.fromkeys(old + keep))[-30000:],
+              "veille : vidéos analysées")
+    SEEN_DIRTY[0] = 0
 
 
 # ============================================================ références (visage / voix)
@@ -365,11 +396,11 @@ def load_references(s: dict, tmp: str):
     files = {"face": [], "voice": []}
     for kind in files:
         try:
-            for obj in sb.storage.from_("references").list(kind) or []:
+            for obj in db.list_dir(f"refs/{kind}"):
                 name = obj.get("name")
                 if not name or name.startswith("."):
                     continue
-                data = sb.storage.from_("references").download(f"{kind}/{name}")
+                data = db.read_bytes(obj["path"])
                 p = os.path.join(tmp, f"ref-{kind}-{safe(name)}")
                 with open(p, "wb") as f:
                     f.write(data)
@@ -541,11 +572,13 @@ def find_duplicate(v: dict):
     if not v.get("published_at") or not v.get("title"):
         return None
     d = datetime.fromisoformat(v["published_at"])
-    r = sb.table("videos").select("id,title,other_urls,url") \
-        .gte("published_at", (d - timedelta(days=2)).isoformat()) \
-        .lte("published_at", (d + timedelta(days=2)).isoformat()).execute()
-    for x in r.data:
-        if fuzz.token_set_ratio(norm(x["title"] or ""), norm(v["title"])) >= 90:
+    videos, _ = db.read("data/videos.json", [])
+    for x in videos:
+        if not x.get("published_at"):
+            continue
+        if abs(datetime.fromisoformat(x["published_at"]) - d) > timedelta(days=2):
+            continue
+        if fuzz.token_set_ratio(norm(x.get("title") or ""), norm(v["title"])) >= 90:
             return x
     return None
 
@@ -627,17 +660,25 @@ def store_file(v: dict, s: dict, tmp: str) -> dict:
 
 def purge_rejected():
     """Supprime du stockage les vidéos écartées dans l'app."""
-    r = sb.table("videos").select("id,file_id,file_1080_id").eq("status", "rejected") \
-        .not_.is_("file_id", "null").execute()
-    for v in r.data:
+    videos, _ = db.read("data/videos.json", [])
+    done = set()
+    for v in videos:
+        if v.get("status") != "rejected" or not v.get("file_id"):
+            continue
         try:
             for a in (v["file_id"], v.get("file_1080_id")):
                 if a:
                     delete_asset(a)
-            sb.table("videos").update({"file_id": None, "file_1080_id": None, "file_name": None}) \
-                .eq("id", v["id"]).execute()
+            done.add(v["id"])
         except Exception as e:
             log("Suppression impossible :", str(e)[:120])
+    if done:
+        def clear(lst):
+            for x in lst:
+                if x["id"] in done:
+                    x.update(file_id=None, file_1080_id=None, file_name=None)
+            return lst
+        db.update("data/videos.json", [], clear, "veille : fichiers écartés supprimés")
 
 
 def process(v: dict, s, names, face, voice, tmp, manual=False) -> bool:
@@ -651,12 +692,17 @@ def process(v: dict, s, names, face, voice, tmp, manual=False) -> bool:
     dup = find_duplicate(v)
     if dup and dup["id"] != v["id"]:
         urls = sorted(set((dup.get("other_urls") or []) + [v["url"]]) - {dup["url"]})
-        sb.table("videos").update({"other_urls": urls}).eq("id", dup["id"]).execute()
+        def add_urls(lst):
+            for x in lst:
+                if x["id"] == dup["id"]:
+                    x["other_urls"] = urls
+            return lst
+        db.update("data/videos.json", [], add_urls, "veille : autre lien ajouté")
         log("Doublon d'une vidéo déjà enregistrée, lien ajouté")
         return False
 
     files = {} if r["too_long"] else store_file(v, s, tmp)
-    sb.table("videos").upsert({
+    row = {
         **files,
         "id": v["id"], "source": v["source"], "channel": v.get("channel"),
         "url": v["url"], "title": v.get("title"),
@@ -667,7 +713,10 @@ def process(v: dict, s, names, face, voice, tmp, manual=False) -> bool:
         "score": g, "score_name": r["name"], "score_face": r["face"],
         "score_voice": r["voice"], "face_hits": r["face_hits"],
         "status": "kept" if manual else "pending",
-    }).execute()
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    db.update("data/videos.json", [], lambda lst: [x for x in lst if x["id"] != row["id"]] + [row],
+              f"veille : nouveau tournage ({row['published_at'] or ''})"[:70])
     log("Vidéo enregistrée")
     notify("Nouveau tournage trouvé", f"{v.get('title') or 'Vidéo'} ({g} %)", "/?tab=pending")
     return True
@@ -676,9 +725,14 @@ def process(v: dict, s, names, face, voice, tmp, manual=False) -> bool:
 # ============================================================ boucle principale
 
 def main():
-    s = sb.table("settings").select("*").eq("id", 1).single().execute().data
+    stored, _ = db.read("data/settings.json", {})
+    s = {**DEFAULT_SETTINGS, **stored}
     names = [n for n in s["name_variants"] if n.strip()]
-    run = sb.table("runs").insert({"started_at": START.isoformat()}).execute().data[0]
+    run = {"id": START.strftime("%Y%m%d%H%M%S"), "started_at": START.isoformat(), "status": "running",
+           "checked": 0, "found": 0}
+    db.update("data/runs.json", [], lambda l: ([run] + [x for x in l if x["id"] != run["id"]])[:60],
+              "veille : début de passage")
+    load_seen()
     errors, checked, found = [], 0, 0
     tmp = tempfile.mkdtemp()
     # état de chaque plateforme, affiché dans l'app
@@ -691,14 +745,20 @@ def main():
     def finish(status=None):
         shutil.rmtree(tmp, ignore_errors=True)
         now = datetime.now(timezone.utc).isoformat()
-        sb.table("platforms").upsert([{"key": k, "status": st, "detail": d, "updated_at": now}
-                                      for k, (st, d) in plat.items()]).execute()
-        sb.table("runs").update({
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "checked": checked, "found": found,
-            "status": status or ("ok" if not errors else "error"),
-            "errors": "\n".join(errors[:40]) or None,
-        }).eq("id", run["id"]).execute()
+        flush_seen()
+        db.update("data/platforms.json", {}, lambda _: {k: {"status": st, "detail": d, "updated_at": now}
+                                                         for k, (st, d) in plat.items()},
+                  "veille : état des plateformes")
+        done = {"finished_at": now, "checked": checked, "found": found,
+                "status": status or ("ok" if not errors else "error"),
+                "errors": "\n".join(errors[:40]) or None}
+
+        def end(lst):
+            for x in lst:
+                if x["id"] == run["id"]:
+                    x.update(done)
+            return lst
+        db.update("data/runs.json", [], end, "veille : fin de passage")
 
     if not names:
         errors.append("Aucun nom configuré dans les réglages.")
@@ -713,8 +773,9 @@ def main():
         errors.append("Reconnaissance de la voix activée mais aucun extrait exploitable.")
 
     # 1) liens ajoutés à la main dans l'app
-    queue = sb.table("queue").select("*").eq("processed", False).execute().data
-    for q in queue:
+    queue, _ = db.read("data/queue.json", [])
+    results = {}
+    for q in [x for x in queue if not x.get("processed")]:
         u = q["url"].lower()
         src = next((k for k in ("instagram", "tiktok", "youtube", "facebook") if k in u),
                    "x" if ("x.com" in u or "twitter.com" in u) else "bfmtv" if "bfmtv" in u else "manual")
@@ -722,11 +783,18 @@ def main():
         try:
             if process(v, s, names, face, voice, tmp, manual=True):
                 found += 1
-            sb.table("queue").update({"processed": True, "error": None}).eq("id", q["id"]).execute()
+            results[q["id"]] = None
         except Exception as e:
             msg = str(e).splitlines()[0][:250]
-            sb.table("queue").update({"processed": True, "error": msg}).eq("id", q["id"]).execute()
+            results[q["id"]] = msg
             errors.append(f"Lien ajouté {q['url']} : {msg}")
+    if results:
+        def mark(lst):
+            for x in lst:
+                if x["id"] in results:
+                    x.update(processed=True, error=results[x["id"]])
+            return lst[-200:]
+        db.update("data/queue.json", [], mark, "veille : liens ajoutés traités")
 
     # 2) sources surveillées, dans l'ordre des réglages
     candidates = []
@@ -752,8 +820,7 @@ def main():
                                     else "Erreur : ") + msg[:140])
 
     uniq = list({c["id"]: c for c in candidates}.values())
-    seen = already_seen([c["id"] for c in uniq])
-    todo = [c for c in uniq if c["id"] not in seen]
+    todo = [c for c in uniq if c["id"] not in SEEN_SET]
     log(f"{len(todo)} nouvelles vidéos à analyser")
 
     blocked = set()
@@ -766,7 +833,7 @@ def main():
         try:
             if process(v, s, names, face, voice, tmp):
                 found += 1
-            sb.table("seen").upsert({"id": v["id"]}).execute()
+            mark_seen(v["id"])
             checked += 1
         except Exception as e:
             msg = str(e).splitlines()[0][:250]
@@ -777,7 +844,7 @@ def main():
                 errors.append(f"{v['source']} bloque les requêtes : voir « Si une plateforme bloque » dans le README.")
             else:
                 errors.append(f"{v['url']} : {msg}")
-                sb.table("seen").upsert({"id": v["id"]}).execute()  # on ne réessaie pas indéfiniment
+                mark_seen(v["id"])  # on ne réessaie pas indéfiniment
 
     finish()
     log(f"Terminé : {checked} analysées, {found} enregistrées, {len(errors)} remarques")

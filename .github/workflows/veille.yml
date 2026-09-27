@@ -49,8 +49,6 @@ jobs:
 
       - name: Lancer la veille
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           STORAGE_REPO: HugoDAG/mes-tournages-stockage
           STORAGE_TOKEN: ${{ secrets.STORAGE_TOKEN }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
