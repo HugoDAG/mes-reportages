@@ -870,6 +870,10 @@ def main():
             msg = str(e).splitlines()[0][:200]
             errors.append(f"Source {src} : {msg}")
             log("Source en échec:", src, msg[:300])
+            try:
+                db.update("data/diag.json", [], lambda l: (l + [{"src": src, "msg": str(e).splitlines()[0][:400]}])[-20:], "diag")
+            except Exception:
+                pass
             blocked_kw = ("Sign in", "429", "login", "rate", "wait a few minutes", "checkpoint", "401", "403")
             plat[kind] = ("error", ("Bloqué par la plateforme : " if any(k in msg for k in blocked_kw)
                                     else "Erreur : ") + msg[:140])
