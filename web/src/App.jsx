@@ -42,7 +42,7 @@ const TABS = [
   { key: 'library', label: 'Mes tournages' },
   { key: 'rejected', label: 'Écartées' },
   { key: 'me', label: 'Visage et voix' },
-  { key: 'history', label: 'Historique' },
+  { key: 'history', label: 'Analyses' },
   { key: 'settings', label: 'Réglages' },
 ]
 
@@ -111,8 +111,15 @@ function Login({ onIn }) {
 function Dashboard({ data, setData, reload, onOut }) {
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'library')
   const [playing, setPlaying] = useState(null)
-  const { videos, runs, settings, platforms, queue } = data
+  const { videos, runs, settings, platforms, queue, analyses } = data
   const load = reload
+  const running = runs[0]?.status === 'running'
+  // pendant une veille, on rafraîchit toutes les 30 s pour suivre l'analyse en direct
+  useEffect(() => {
+    if (!running) return
+    const t = setInterval(() => reload(), 30000)
+    return () => clearInterval(t)
+  }, [running])
 
   const counts = useMemo(() => {
     const c = {}
@@ -140,6 +147,13 @@ function Dashboard({ data, setData, reload, onOut }) {
         </p>
       </header>
 
+      {running && tab !== 'history' && (
+        <button className="live-banner" onClick={() => setTab('history')}>
+          <span className="pulse" aria-hidden />
+          Analyse en cours : {runs[0].done ?? 0} / {runs[0].total ?? '…'} vidéos
+        </button>
+      )}
+
       <nav className="tabs" role="tablist">
         {TABS.map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key}
@@ -164,7 +178,7 @@ function Dashboard({ data, setData, reload, onOut }) {
           tab="rejected" names={names} onStatus={setStatus} goTab={setTab} onPlay={setPlaying} />
       )}
       {tab === 'me' && <References settings={settings} />}
-      {tab === 'history' && <History runs={runs} />}
+      {tab === 'history' && <><LiveRun run={runs[0]} /><AnalysisLog items={analyses || []} /><History runs={runs} /></>}
       {tab === 'settings' && settings && <><Notifications /><Platforms rows={platforms} /><Settings initial={settings} onSaved={load} /></>}
       {playing && <Player v={playing} onClose={() => setPlaying(null)} />}
 
@@ -803,5 +817,118 @@ function Platforms({ rows = {} }) {
         })}
       </ul>
     </fieldset>
+  )
+}
+
+/* ---------------------------------------------------------------- analyses */
+
+const DECISIONS = {
+  saved: { label: 'Retenue', cls: 'saved' },
+  below: { label: 'Sous le seuil', cls: 'below' },
+  too_long: { label: 'Trop longue', cls: 'muted' },
+  duplicate: { label: 'Doublon', cls: 'muted' },
+  error: { label: 'Erreur', cls: 'err' },
+}
+
+const ago = (d) => {
+  if (!d) return ''
+  const s = Math.round((Date.now() - new Date(d)) / 1000)
+  if (s < 60) return 'à l’instant'
+  if (s < 3600) return `il y a ${Math.round(s / 60)} min`
+  return `il y a ${Math.round(s / 3600)} h`
+}
+
+function LiveRun({ run }) {
+  if (!run || run.status !== 'running') {
+    return run ? (
+      <div className="live idle">
+        <p><strong>Aucune analyse en cours.</strong> Dernier passage terminé {ago(run.finished_at || run.started_at)} : {run.checked} vidéos analysées, {run.found} retenue{run.found > 1 ? 's' : ''}.</p>
+        <p className="note">Prochain passage automatique sous 2 jours. Pour en lancer un tout de suite : repo GitHub mes-reportages, onglet Actions, « Veille reportages », « Run workflow ».</p>
+      </div>
+    ) : null
+  }
+  const total = run.total || 0
+  const done = run.done || 0
+  const pct = total ? Math.round((100 * done) / total) : 0
+  const stale = run.updated_at && Date.now() - new Date(run.updated_at) > 20 * 60 * 1000
+  return (
+    <div className="live" aria-live="polite">
+      <div className="live-head">
+        <span className="pulse" aria-hidden />
+        <strong>{run.phase || 'Analyse'}</strong>
+        <span className="note">démarrée {ago(run.started_at)}</span>
+      </div>
+      {total > 0 && (
+        <>
+          <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
+            <span style={{ width: `${pct}%` }} />
+          </div>
+          <p className="live-count"><strong>{done}</strong> / {total} vidéos analysées ({pct} %), <strong>{run.found || 0}</strong> retenue{run.found > 1 ? 's' : ''}</p>
+        </>
+      )}
+      {run.current && <p className="live-current">En cours : {run.current}</p>}
+      <p className="note">
+        {stale ? 'Pas de nouvelle depuis plus de 20 minutes : la veille a peut-être été interrompue.' : `Mis à jour ${ago(run.updated_at || run.started_at)}. La page se rafraîchit toute seule.`}
+      </p>
+    </div>
+  )
+}
+
+function AnalysisLog({ items }) {
+  const [filter, setFilter] = useState('all')
+  const [limit, setLimit] = useState(60)
+  const counts = useMemo(() => {
+    const c = { all: items.length }
+    items.forEach((a) => { c[a.decision] = (c[a.decision] || 0) + 1 })
+    return c
+  }, [items])
+  const list = items.filter((a) => filter === 'all' || a.decision === filter)
+  const chips = [['all', 'Toutes'], ['saved', 'Retenues'], ['below', 'Sous le seuil'], ['error', 'Erreurs']]
+
+  return (
+    <section className="alog">
+      <h2 className="h2">Vidéos analysées</h2>
+      {!items.length ? (
+        <p className="note">Le détail de chaque vidéo analysée apparaîtra ici dès le prochain passage.</p>
+      ) : (
+        <>
+          <div className="chips" role="group" aria-label="Filtrer">
+            {chips.map(([k, l]) => (
+              <button key={k} className={filter === k ? 'chip on' : 'chip'} onClick={() => { setFilter(k); setLimit(60) }}>
+                {l} <span>{counts[k] || 0}</span>
+              </button>
+            ))}
+          </div>
+          <ul className="alog-list">
+            {list.slice(0, limit).map((a) => {
+              const d = DECISIONS[a.decision] || { label: a.decision, cls: 'muted' }
+              return (
+                <li key={`${a.id}-${a.at}`} className="alog-row">
+                  <a className="alog-thumb" href={a.url} target="_blank" rel="noreferrer">
+                    {a.thumbnail ? <img src={a.thumbnail} alt="" loading="lazy" /> : <div className="noimg" />}
+                  </a>
+                  <div className="alog-body">
+                    <a className="alog-title" href={a.url} target="_blank" rel="noreferrer">{a.title || a.url}</a>
+                    <p className="meta">{a.channel || SOURCES[a.source] || a.source}, analysée {ago(a.at)}</p>
+                    {a.decision === 'error' ? (
+                      <p className="alog-err">{a.error}</p>
+                    ) : (
+                      <p className="alog-scores">
+                        Nom {a.score_name ?? 0} %, visage {a.score_face ?? 'non analysé'}{a.score_face != null ? ' %' : ''}, voix {a.score_voice ?? 'non analysée'}{a.score_voice != null ? ' %' : ''}
+                      </p>
+                    )}
+                  </div>
+                  <div className="alog-side">
+                    <span className={`decision ${d.cls}`}>{d.label}</span>
+                    {a.score != null && <strong className="alog-score">{a.score} %</strong>}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+          {list.length > limit && <button className="btn" onClick={() => setLimit(limit + 60)}>Afficher plus</button>}
+        </>
+      )}
+    </section>
   )
 }

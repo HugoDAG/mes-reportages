@@ -20,6 +20,7 @@ import glob
 import json
 import shutil
 import tempfile
+import time
 import subprocess
 import traceback
 import unicodedata
@@ -281,6 +282,41 @@ def mark_seen(vid: str, flush_every: int = 25):
     SEEN_DIRTY[0] += 1
     if SEEN_DIRTY[0] >= flush_every:
         flush_seen()
+
+
+ANALYSES: list[dict] = []   # journal des analyses de ce passage, pas encore écrit
+PROGRESS = {}               # progression du passage en cours (lue par l'app)
+LAST_FLUSH = [0.0]
+
+
+def log_analysis(v: dict, res: dict):
+    ANALYSES.append({
+        "id": v["id"], "at": datetime.now(timezone.utc).isoformat(), "run": PROGRESS.get("id"),
+        "source": v.get("source"), "channel": v.get("channel"), "title": v.get("title") or "",
+        "url": v.get("url"), "thumbnail": v.get("thumbnail"), "duration": v.get("duration"),
+        **res,
+    })
+
+
+def flush_progress(force: bool = False):
+    """Écrit la progression et le journal toutes les ~90 s (l'app les affiche en direct)."""
+    if not force and time.time() - LAST_FLUSH[0] < 90:
+        return
+    LAST_FLUSH[0] = time.time()
+    flush_seen()
+    if ANALYSES:
+        batch = ANALYSES[:]
+        db.update("data/analyses.json", [], lambda old: (old + batch)[-800:], "veille : journal d'analyse")
+        del ANALYSES[:len(batch)]
+    if PROGRESS:
+        snap = dict(PROGRESS, updated_at=datetime.now(timezone.utc).isoformat())
+
+        def upd(lst):
+            for x in lst:
+                if x["id"] == snap["id"]:
+                    x.update(snap)
+            return lst
+        db.update("data/runs.json", [], upd, "veille : progression")
 
 
 def flush_seen():
@@ -684,9 +720,13 @@ def purge_rejected():
 def process(v: dict, s, names, face, voice, tmp, manual=False) -> bool:
     r = analyse(v, s, names, face, voice, tmp)
     g = global_score(r)
+    res = {"score": g, "score_name": r["name"], "score_face": r["face"], "score_voice": r["voice"],
+           "face_hits": r["face_hits"], "match_type": r["match_type"]}
     if r["too_long"] and not manual:
+        log_analysis(v, {**res, "decision": "too_long"})
         return False
     if g < s["threshold"] and not manual:
+        log_analysis(v, {**res, "decision": "below"})
         return False
 
     dup = find_duplicate(v)
@@ -699,6 +739,7 @@ def process(v: dict, s, names, face, voice, tmp, manual=False) -> bool:
             return lst
         db.update("data/videos.json", [], add_urls, "veille : autre lien ajouté")
         log("Doublon d'une vidéo déjà enregistrée, lien ajouté")
+        log_analysis(v, {**res, "decision": "duplicate"})
         return False
 
     files = {} if r["too_long"] else store_file(v, s, tmp)
@@ -718,6 +759,7 @@ def process(v: dict, s, names, face, voice, tmp, manual=False) -> bool:
     db.update("data/videos.json", [], lambda lst: [x for x in lst if x["id"] != row["id"]] + [row],
               f"veille : nouveau tournage ({row['published_at'] or ''})"[:70])
     log("Vidéo enregistrée")
+    log_analysis(v, {**res, "decision": "saved"})
     notify("Nouveau tournage trouvé", f"{v.get('title') or 'Vidéo'} ({g} %)", "/?tab=pending")
     return True
 
@@ -733,6 +775,7 @@ def main():
     db.update("data/runs.json", [], lambda l: ([run] + [x for x in l if x["id"] != run["id"]])[:60],
               "veille : début de passage")
     load_seen()
+    PROGRESS.update(id=run["id"], phase="Préparation")
     errors, checked, found = [], 0, 0
     tmp = tempfile.mkdtemp()
     # état de chaque plateforme, affiché dans l'app
@@ -744,6 +787,8 @@ def main():
 
     def finish(status=None):
         shutil.rmtree(tmp, ignore_errors=True)
+        PROGRESS.update(phase="Terminé", current=None)
+        flush_progress(force=True)
         now = datetime.now(timezone.utc).isoformat()
         flush_seen()
         db.update("data/platforms.json", {}, lambda _: {k: {"status": st, "detail": d, "updated_at": now}
@@ -805,6 +850,8 @@ def main():
               [("bfmtv", list_rss, f, ()) for f in s["rss_feeds"]]
     counts = {}
     for kind, fn, src, args in sources:
+        PROGRESS.update(phase="Lecture des sources", current=src)
+        flush_progress()
         try:
             got = list(fn(src, *args))
             log(f"{src} : {len(got)} vidéos listées")
@@ -822,6 +869,8 @@ def main():
     uniq = list({c["id"]: c for c in candidates}.values())
     todo = [c for c in uniq if c["id"] not in SEEN_SET]
     log(f"{len(todo)} nouvelles vidéos à analyser")
+    PROGRESS.update(phase="Analyse", total=len(todo), listed=len(uniq), done=0)
+    flush_progress(force=True)
 
     blocked = set()
     for v in todo:
@@ -830,6 +879,9 @@ def main():
         if not time_left():
             errors.append(f"Temps maximum atteint : {len(todo) - checked} vidéos reportées au prochain passage.")
             break
+        PROGRESS.update(current=(v.get("title") or v["url"])[:140], current_source=v["source"],
+                        done=checked, found=found)
+        flush_progress()
         try:
             if process(v, s, names, face, voice, tmp):
                 found += 1
@@ -844,7 +896,9 @@ def main():
                 errors.append(f"{v['source']} bloque les requêtes : voir « Si une plateforme bloque » dans le README.")
             else:
                 errors.append(f"{v['url']} : {msg}")
+                log_analysis(v, {"decision": "error", "error": msg})
                 mark_seen(v["id"])  # on ne réessaie pas indéfiniment
+                checked += 1
 
     finish()
     log(f"Terminé : {checked} analysées, {found} enregistrées, {len(errors)} remarques")
