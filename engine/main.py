@@ -802,7 +802,7 @@ def main():
     names = [n for n in s["name_variants"] if n.strip()]
     run = {"id": START.strftime("%Y%m%d%H%M%S"), "started_at": START.isoformat(), "status": "running",
            "checked": 0, "found": 0}
-    db.update("data/runs.json", [], lambda l: ([run] + [x for x in l if x["id"] != run["id"]])[:60],
+    db.update("data/runs.json", [], lambda l: ([run] + [x for x in l if x["id"] != run["id"]])[:12],
               "veille : début de passage")
     load_seen()
     PROGRESS.update(id=run["id"], phase="Préparation")
@@ -835,7 +835,7 @@ def main():
             for x in lst:
                 if x["id"] == run["id"]:
                     x.update(done)
-            return lst
+            return lst[:12]
         db.update("data/runs.json", [], end, "veille : fin de passage")
 
     if not names:

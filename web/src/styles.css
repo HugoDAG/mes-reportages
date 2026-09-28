@@ -447,3 +447,5 @@ button.mini { border: 0; padding: 0; cursor: pointer; display: block; width: 100
 .guide-table td:first-child { font-weight: 600; white-space: nowrap; }
 .run-btn { margin-top: 10px; }
 .run-btn p { margin: 8px 0 0; }
+.muted-run { border-left-color: var(--ligne); padding: 8px 0 8px 14px; }
+.muted-run .note { font-style: italic; }

@@ -596,18 +596,26 @@ function History({ runs }) {
     seenRunning.v = true
     return r
   })
-  if (!clean.length) return <div className="empty"><p>Aucun passage pour l’instant.</p></div>
+  if (!clean.length) return <div className="empty"><p>Aucun passage pour l’instant. Lance une analyse depuis le bouton ci-dessus.</p></div>
+  // on ne montre que les passages « utiles » : en cours, avec des vidéos analysées, ou avec une vraie erreur
+  const meaningful = clean.filter((r) => r.status === 'running' || (r.checked || 0) > 0 || (r.found || 0) > 0
+    || (r.errors && !/aucune photo|aucun extrait/i.test(r.errors)))
+  const hiddenEmpty = clean.length - meaningful.length
+  if (!meaningful.length) {
+    return <div className="empty"><p>Les derniers passages n’avaient aucune nouvelle vidéo à analyser. Le détail apparaîtra ici dès qu’il y en aura.</p></div>
+  }
   return (
     <ul className="runs">
-      {clean.map((r) => (
+      {meaningful.map((r) => (
         <li key={r.id} className={`run ${r.status}`}>
           <div className="run-head">
             <strong>{fmtDateTime(r.started_at)}</strong>
             <span>{r.status === 'running' ? 'En cours…' : r.phase === 'Interrompu' ? 'Interrompu' : `${r.checked} analysées, ${r.found} enregistrée${r.found > 1 ? 's' : ''}`}</span>
           </div>
-          {r.errors && <details><summary>Voir les remarques</summary><pre>{r.errors}</pre></details>}
+          {r.errors && !/aucune photo|aucun extrait/i.test(r.errors) && <details><summary>Voir les remarques</summary><pre>{r.errors}</pre></details>}
         </li>
       ))}
+      {hiddenEmpty > 0 && <li className="run muted-run"><span className="note">{hiddenEmpty} passage{hiddenEmpty > 1 ? 's' : ''} sans nouvelle vidéo (masqué{hiddenEmpty > 1 ? 's' : ''})</span></li>}
     </ul>
   )
 }
