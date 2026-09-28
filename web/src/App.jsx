@@ -588,14 +588,22 @@ function References({ settings }) {
 /* ---------------------------------------------------------------- historique */
 
 function History({ runs }) {
-  if (!runs.length) return <div className="empty"><p>Aucun passage pour l’instant. Lance le premier depuis l’onglet Actions de ton repo GitHub.</p></div>
+  // un seul passage « en cours » a du sens (le plus récent) ; les anciens 'running' sont des passages interrompus
+  const seenRunning = { v: false }
+  const clean = runs.map((r) => {
+    if (r.status !== 'running') return r
+    if (seenRunning.v) return { ...r, status: 'error', phase: 'Interrompu' }
+    seenRunning.v = true
+    return r
+  })
+  if (!clean.length) return <div className="empty"><p>Aucun passage pour l’instant.</p></div>
   return (
     <ul className="runs">
-      {runs.map((r) => (
+      {clean.map((r) => (
         <li key={r.id} className={`run ${r.status}`}>
           <div className="run-head">
             <strong>{fmtDateTime(r.started_at)}</strong>
-            <span>{r.status === 'running' ? 'En cours ou interrompu' : `${r.checked} analysées, ${r.found} enregistrée${r.found > 1 ? 's' : ''}`}</span>
+            <span>{r.status === 'running' ? 'En cours…' : r.phase === 'Interrompu' ? 'Interrompu' : `${r.checked} analysées, ${r.found} enregistrée${r.found > 1 ? 's' : ''}`}</span>
           </div>
           {r.errors && <details><summary>Voir les remarques</summary><pre>{r.errors}</pre></details>}
         </li>

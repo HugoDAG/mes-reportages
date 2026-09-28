@@ -262,6 +262,9 @@ def list_page(page: str):
         href = urljoin(page, a["href"]).split("#")[0]
         if href in seen or not VIDEO_LINK.search(href) or not href.startswith("http"):
             continue
+        # rmcsport.bfmtv.com utilise un lecteur que yt-dlp ne sait pas lire : on l'ignore
+        if "rmcsport" in href or "rmc.bfmtv" in href:
+            continue
         seen.add(href)
         title = a.get_text(" ", strip=True)
         yield {"id": f"web:{href}", "source": "bfmtv", "channel": "bfmtv.com",
