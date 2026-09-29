@@ -341,9 +341,10 @@ def flush_seen():
 class FaceMatcher:
     def __init__(self):
         from insightface.app import FaceAnalysis
-        self.app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"],
+        pack = os.environ.get("FACE_MODEL", "buffalo_s")  # buffalo_l sur un vrai PC pour + de précision
+        self.app = FaceAnalysis(name=pack, providers=["CPUExecutionProvider"],
                                 allowed_modules=["detection", "recognition"])
-        self.app.prepare(ctx_id=-1, det_size=(640, 640))
+        self.app.prepare(ctx_id=-1, det_size=(480, 480))
         self.refs = []
 
     def add_reference(self, path: str):
@@ -364,16 +365,27 @@ class FaceMatcher:
         fdir = os.path.join(tmp, "frames")
         shutil.rmtree(fdir, ignore_errors=True)
         os.makedirs(fdir)
-        ffmpeg("-i", video, "-vf", f"fps=1/{every},scale='min(960,iw)':-2", "-q:v", "3",
+        # au plus 120 images par vidéo : au-delà, on espace davantage (évite de saturer la mémoire)
+        dur = 0.0
+        try:
+            dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                        "-of", "csv=p=0", video], capture_output=True, text=True).stdout.strip() or 0)
+        except Exception:
+            pass
+        step = max(every, dur / 120) if dur else every
+        ffmpeg("-i", video, "-vf", f"fps=1/{step},scale='min(854,iw)':-2", "-q:v", "4",
                os.path.join(fdir, "%05d.jpg"))
         refs = np.stack(self.refs)
         sims = []
         for p in sorted(glob.glob(os.path.join(fdir, "*.jpg"))):
             img = cv2.imread(p)
+            if img is None:
+                continue
             for f in self.app.get(img):
                 if (f.bbox[2] - f.bbox[0]) < 40:  # visages trop petits : peu fiables
                     continue
                 sims.append(float(np.max(refs @ f.normed_embedding)))
+            os.remove(p)  # libère au fur et à mesure
         shutil.rmtree(fdir, ignore_errors=True)
         if not sims:
             return 0, 0
@@ -486,7 +498,7 @@ def transcribe(wav: str) -> str:
     global _whisper
     if _whisper is None:
         from faster_whisper import WhisperModel
-        _whisper = WhisperModel("small", device="cpu", compute_type="int8")
+        _whisper = WhisperModel(os.environ.get("WHISPER_MODEL", "base"), device="cpu", compute_type="int8")
     segs, _ = _whisper.transcribe(wav, language="fr", vad_filter=True)
     return " ".join(x.text for x in segs)
 

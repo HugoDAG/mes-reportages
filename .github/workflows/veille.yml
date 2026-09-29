@@ -48,6 +48,7 @@ jobs:
         run: printf '%s' "$YT_COOKIES" > "$RUNNER_TEMP/cookies.txt"
 
       - name: Lancer la veille
+        continue-on-error: true
         env:
           STORAGE_REPO: HugoDAG/mes-tournages-stockage
           STORAGE_TOKEN: ${{ secrets.STORAGE_TOKEN }}
@@ -57,6 +58,9 @@ jobs:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           YT_COOKIES_FILE: ${{ runner.temp }}/cookies.txt
           MAX_RUN_MINUTES: "300"
+          FACE_MODEL: "buffalo_s"
+          WHISPER_MODEL: "base"
+          OMP_NUM_THREADS: "2"
         run: python engine/main.py
 
       # GitHub désactive les tâches planifiées d'un repo public sans activité
