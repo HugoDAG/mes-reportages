@@ -75,7 +75,7 @@ export default function App() {
   if (state === 'loading') return null
   if (state === 'out') return <Login onIn={load} />
   if (state === 'error') {
-    return <main className="login"><h1 className="brand">Mes reportages</h1><p className="error">{error}</p>
+    return <main className="login"><h1 className="brand">Mes <b>reportages</b></h1><p className="error">{error}</p>
       <button className="btn" onClick={load}>Réessayer</button></main>
   }
   return <Dashboard data={data} setData={setData} reload={load} onOut={() => setState('out')} />
@@ -98,7 +98,7 @@ function Login({ onIn }) {
   }
   return (
     <main className="login">
-      <h1 className="brand">Mes reportages</h1>
+      <div className="masthead"><span className="lamp live" aria-hidden /><h1 className="brand">Mes <b>reportages</b></h1></div>
       <label htmlFor="code">Code d’accès</label>
       <input id="code" value={code} autoComplete="current-password" autoCapitalize="characters"
         onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} />
@@ -140,12 +140,17 @@ function Dashboard({ data, setData, reload, onOut }) {
   return (
     <div className="shell">
       <header className="top">
-        <h1 className="brand">Mes reportages</h1>
+        <div className="masthead">
+          <span className={running ? 'lamp live' : 'lamp'} aria-hidden />
+          <h1 className="brand">Mes <b>reportages</b></h1>
+        </div>
         <p className="status">
-          {lastRun
-            ? <>Dernière veille le {fmtDateTime(lastRun.started_at)} : {lastRun.checked} vidéos analysées, {lastRun.found} enregistrée{lastRun.found > 1 ? 's' : ''}
-                {lastRun.status === 'error' && <span className="warn">, avec des remarques</span>}</>
-            : 'La première veille n’a pas encore tourné.'}
+          {running
+            ? <><b>Analyse en cours.</b> Les nouvelles vidéos sont passées en revue.</>
+            : lastRun
+              ? <>Dernière veille le {fmtDateTime(lastRun.started_at)} : <b>{lastRun.checked}</b> vidéos analysées, <b>{lastRun.found}</b> retenue{lastRun.found > 1 ? 's' : ''}
+                  {lastRun.status === 'error' && <span className="warn"> · avec des remarques</span>}</>
+              : 'La première veille n’a pas encore tourné.'}
         </p>
       </header>
 
