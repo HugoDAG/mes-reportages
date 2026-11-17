@@ -1,9 +1,11 @@
 import { guard, updateJson } from './_lib.js'
 
 const STATUSES = ['pending', 'kept', 'rejected']
-const SETTING_KEYS = ['name_variants', 'youtube_channels', 'tiktok_accounts', 'instagram_accounts', 'pages',
+const SETTING_KEYS = ['name_variants', 'youtube_channels', 'tiktok_accounts', 'instagram_accounts',
+  'dailymotion_accounts', 'pages',
   'rss_feeds', 'lookback', 'max_duration_min', 'tail_seconds', 'frame_interval', 'threshold',
-  'whisper_enabled', 'face_enabled', 'voice_enabled', 'max_quality', 'youtube_enabled']
+  'whisper_enabled', 'face_enabled', 'voice_enabled', 'max_quality', 'youtube_enabled',
+  'book_title', 'book_name', 'book_intro', 'book_public']
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
@@ -18,6 +20,20 @@ export default async function handler(req, res) {
         v.status = b.status
         return list
       }, `app : ${b.status === 'kept' ? 'tournage validé' : b.status === 'rejected' ? 'tournage écarté' : 'tournage à revoir'}`)
+      return res.json({ ok: true })
+    }
+    if (b.type === 'meta') {
+      // étiquettes posées à la main : rôle, thème, « à la une »
+      const patch = {}
+      if ('role' in b) patch.role = String(b.role || '').slice(0, 60)
+      if ('theme' in b) patch.theme = String(b.theme || '').slice(0, 60)
+      if ('featured' in b) patch.featured = !!b.featured
+      await updateJson('data/videos.json', [], (list) => {
+        const v = list.find((x) => x.id === b.id)
+        if (!v) return undefined
+        Object.assign(v, patch)
+        return list
+      }, 'app : étiquette modifiée')
       return res.json({ ok: true })
     }
     if (b.type === 'settings') {

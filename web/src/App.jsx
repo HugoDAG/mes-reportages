@@ -27,8 +27,8 @@ const REASONS = {
 }
 
 const SOURCES = {
-  youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook',
-  x: 'X', bfmtv: 'bfmtv.com', manual: 'Lien ajouté',
+  youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok', dailymotion: 'Dailymotion',
+  facebook: 'Facebook', x: 'X', bfmtv: 'bfmtv.com', manual: 'Lien ajouté',
 }
 
 // Les vidéos sont servies par /api/download, qui vérifie la session avant de rediriger vers le stockage
@@ -54,6 +54,13 @@ const fmtDateTime = (d) =>
 const fmtDur = (s) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '')
 
 export default function App() {
+  // Vue publique : book partageable, sans connexion. L'URL ne change pas en cours de session,
+  // donc ce choix est stable (pas de souci de règles des hooks).
+  if (new URLSearchParams(window.location.search).has('book')) return <PublicBook />
+  return <AppMain />
+}
+
+function AppMain() {
   const [state, setState] = useState('loading') // loading | in | out
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
@@ -134,6 +141,11 @@ function Dashboard({ data, setData, reload, onOut }) {
     try { await act({ type: 'status', id, status }) } catch (e) { alert(`Modification non enregistrée : ${e.message}`); reload() }
   }
 
+  const setMeta = async (id, patch) => {
+    setData((d) => ({ ...d, videos: d.videos.map((v) => (v.id === id ? { ...v, ...patch } : v)) }))
+    try { await act({ type: 'meta', id, ...patch }) } catch (e) { alert(`Étiquette non enregistrée : ${e.message}`); reload() }
+  }
+
   const lastRun = runs[0]
   const names = settings?.name_variants || []
 
@@ -181,14 +193,14 @@ function Dashboard({ data, setData, reload, onOut }) {
         </>
       )}
       {tab === 'library' && <AddLink queue={queue} onAdded={load} />}
-      {tab === 'library' && <Library videos={videos.filter((v) => v.status !== 'rejected')} onStatus={setStatus} onPlay={setPlaying} />}
+      {tab === 'library' && <Library videos={videos.filter((v) => v.status !== 'rejected')} settings={settings} onStatus={setStatus} onMeta={setMeta} onPlay={setPlaying} goTab={setTab} />}
       {tab === 'rejected' && (
         <VideoList videos={videos.filter((v) => v.status === 'rejected')}
           tab="rejected" names={names} onStatus={setStatus} goTab={setTab} onPlay={setPlaying} />
       )}
       {tab === 'me' && <References settings={settings} />}
       {tab === 'history' && <><LiveRun run={runs[0]} ghRun={ghRun} onStarted={load} goGuide={() => setTab('guide')} /><AnalysisLog items={analyses || []} /><History runs={runs} /></>}
-      {tab === 'settings' && settings && <><Notifications /><Platforms rows={platforms} /><SourcesManager settings={settings} onSaved={load} goGuide={() => setTab('guide')} /><Settings initial={settings} onSaved={load} /></>}
+      {tab === 'settings' && settings && <><Notifications /><BookSettings settings={settings} onSaved={load} /><Platforms rows={platforms} /><SourcesManager settings={settings} onSaved={load} goGuide={() => setTab('guide')} /><Settings initial={settings} onSaved={load} /></>}
       {tab === 'guide' && <Guide goTab={setTab} />}
       {playing && <Player v={playing} onClose={() => setPlaying(null)} />}
 
@@ -339,20 +351,44 @@ function Downloads({ v }) {
   )
 }
 
-function Library({ videos, onStatus, onPlay }) {
+function TagRow({ v, onMeta }) {
+  const [role, setRole] = useState(v.role || '')
+  const [theme, setTheme] = useState(v.theme || '')
+  useEffect(() => { setRole(v.role || ''); setTheme(v.theme || '') }, [v.id])
+  const saveRole = () => { if ((role || '') !== (v.role || '')) onMeta(v.id, { role }) }
+  const saveTheme = () => { if ((theme || '') !== (v.theme || '')) onMeta(v.id, { theme }) }
+  return (
+    <div className="tagrow">
+      <button className={v.featured ? 'star on' : 'star'} onClick={() => onMeta(v.id, { featured: !v.featured })}
+        aria-pressed={!!v.featured} title={v.featured ? 'Retirer du book' : 'Mettre à la une'}>
+        {v.featured ? '★ À la une' : '☆ À la une'}
+      </button>
+      <input className="tag" value={role} onChange={(e) => setRole(e.target.value)} onBlur={saveRole}
+        onKeyDown={(e) => e.key === 'Enter' && e.target.blur()} placeholder="Ton rôle (JRI, voix off…)" aria-label="Rôle" />
+      <input className="tag" value={theme} onChange={(e) => setTheme(e.target.value)} onBlur={saveTheme}
+        onKeyDown={(e) => e.key === 'Enter' && e.target.blur()} placeholder="Thème" aria-label="Thème" />
+    </div>
+  )
+}
+
+function Library({ videos, settings, onStatus, onMeta, onPlay, goTab }) {
   const [q, setQ] = useState('')
   const [platform, setPlatform] = useState('all')
   const [state, setState] = useState('all')
+  const [starred, setStarred] = useState(false)
 
   const platforms = useMemo(() => [...new Set(videos.map((v) => v.source))], [videos])
+  const featuredCount = useMemo(() => videos.filter((v) => v.featured).length, [videos])
+  const bookUrl = `${window.location.origin}/?book`
 
   const filtered = useMemo(() => {
     const nq = q.trim().toLowerCase()
     return videos.filter((v) =>
       (platform === 'all' || v.source === platform) &&
       (state === 'all' || v.status === state) &&
-      (!nq || `${v.title} ${v.channel}`.toLowerCase().includes(nq)))
-  }, [videos, q, platform, state])
+      (!starred || v.featured) &&
+      (!nq || `${v.title} ${v.channel} ${v.role || ''} ${v.theme || ''}`.toLowerCase().includes(nq)))
+  }, [videos, q, platform, state, starred])
 
   const years = useMemo(() => {
     const g = {}
@@ -385,6 +421,24 @@ function Library({ videos, onStatus, onPlay }) {
 
   return (
     <div className="library">
+      {settings?.book_public ? (
+        <div className="sharebar">
+          <div>
+            <strong>Book public en ligne</strong>
+            <p className="note">{featuredCount} sujet{featuredCount > 1 ? 's' : ''} à la une. Partage ce lien : <a href={bookUrl} target="_blank" rel="noreferrer">{bookUrl.replace(/^https?:\/\//, '')}</a></p>
+          </div>
+          <button className="btn" onClick={() => { navigator.clipboard?.writeText(bookUrl); }}>Copier le lien</button>
+        </div>
+      ) : featuredCount > 0 ? (
+        <div className="sharebar">
+          <div>
+            <strong>{featuredCount} sujet{featuredCount > 1 ? 's' : ''} marqué{featuredCount > 1 ? 's' : ''} « à la une »</strong>
+            <p className="note">Publie ton book pour en faire une page partageable.</p>
+          </div>
+          <button className="btn" onClick={() => goTab('settings')}>Publier mon book</button>
+        </div>
+      ) : null}
+
       <div className="lib-head">
         <p><strong>{filtered.length}</strong> tournage{filtered.length > 1 ? 's' : ''}{total ? `, ${fmtSize(total)}` : ''}</p>
         <div className="actions">
@@ -393,7 +447,7 @@ function Library({ videos, onStatus, onPlay }) {
       </div>
 
       <div className="filters">
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un sujet" aria-label="Rechercher un sujet" />
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher (titre, rôle, thème…)" aria-label="Rechercher un sujet" />
         <select value={platform} onChange={(e) => setPlatform(e.target.value)} aria-label="Plateforme">
           <option value="all">Toutes les plateformes</option>
           {platforms.map((p) => <option key={p} value={p}>{SOURCES[p] || p}</option>)}
@@ -404,6 +458,7 @@ function Library({ videos, onStatus, onPlay }) {
           <option value="pending">À vérifier uniquement</option>
         </select>
       </div>
+      <label className="starfilter"><input type="checkbox" checked={starred} onChange={(e) => setStarred(e.target.checked)} /> À la une seulement</label>
 
       {!filtered.length && <div className="empty"><p>Aucun tournage ne correspond à ces filtres.</p></div>}
 
@@ -424,8 +479,12 @@ function Library({ videos, onStatus, onPlay }) {
                     {fmtDate(v.published_at)}, {v.channel || SOURCES[v.source]}
                     {v.duration ? `, ${fmtDur(v.duration)}` : ''}
                     {v.status === 'pending' && <span className="pill">à vérifier</span>}
+                    {v.featured && <span className="pill star-pill">à la une</span>}
+                    {v.role && <span className="tag-chip">{v.role}</span>}
+                    {v.theme && <span className="tag-chip">{v.theme}</span>}
                   </p>
                   <Downloads v={v} />
+                  <TagRow v={v} onMeta={onMeta} />
                 </div>
                 <button className="link" onClick={() => onStatus(v.id, 'rejected')}>Retirer</button>
               </li>
@@ -799,6 +858,7 @@ const PLATFORM_INFO = [
   { key: 'youtube', name: 'YouTube', account: 'Indisponible en ligne', how: 'YouTube exige désormais un jeton spécial que les serveurs comme GitHub ne peuvent pas fournir : l’analyse automatique de YouTube n’est pas possible en ligne. Tes sujets BFM Marseille restent couverts par bfmtv.com. Pour inclure YouTube, il faudrait faire tourner le moteur sur un ordinateur chez toi (voir le mode d’emploi).' },
   { key: 'bfmtv', name: 'bfmtv.com', account: 'Sans compte', how: 'Lecture directe des rubriques du site.' },
   { key: 'tiktok', name: 'TikTok', account: 'Sans compte', how: 'Lecture directe des comptes publics.' },
+  { key: 'dailymotion', name: 'Dailymotion', account: 'Sans compte', how: 'Lecture directe des comptes publics. Beaucoup de médias français (BFM, franceinfo…) y publient leurs sujets.' },
   { key: 'instagram', name: 'Instagram', account: 'Compte requis', how: 'Un compte Instagram secondaire connecté (inutile de suivre les pages). À paramétrer plus tard.' },
   { key: 'facebook', name: 'Facebook', account: 'Par lien uniquement', how: 'Pas de surveillance automatique possible : colle le lien d’une vidéo dans Mes tournages.' },
   { key: 'x', name: 'X', account: 'Par lien uniquement', how: 'Pas de surveillance automatique possible : colle le lien d’une vidéo dans Mes tournages.' },
@@ -997,6 +1057,7 @@ const SOURCE_KINDS = [
   { key: 'youtube_channels', label: 'YouTube', example: 'https://www.youtube.com/@BFM-Marseille' },
   { key: 'tiktok_accounts', label: 'TikTok', example: 'https://www.tiktok.com/@nomducompte' },
   { key: 'instagram_accounts', label: 'Instagram', example: 'https://www.instagram.com/nomducompte' },
+  { key: 'dailymotion_accounts', label: 'Dailymotion', example: 'https://www.dailymotion.com/BFMTV' },
   { key: 'pages', label: 'bfmtv.com', example: 'https://www.bfmtv.com/marseille/' },
   { key: 'rss_feeds', label: 'Flux RSS', example: 'https://…/rss.xml' },
 ]
@@ -1035,6 +1096,11 @@ function detectSource(raw, forced) {
   }
   if (host.endsWith('facebook.com') || host === 'fb.watch' || host === 'x.com' || host.endsWith('twitter.com')) {
     return { error: 'Facebook et X ne peuvent pas être surveillés automatiquement. Colle plutôt le lien de chaque vidéo dans Mes tournages.' }
+  }
+  if (host.endsWith('dailymotion.com') || host === 'dai.ly') {
+    if (host === 'dai.ly' || parts[0] === 'video') return { error: VIDEO_MSG }
+    if (!parts[0]) return { error: 'Colle le lien du compte, par exemple https://www.dailymotion.com/BFMTV' }
+    return { key: 'dailymotion_accounts', value: `https://www.dailymotion.com/${parts[0]}` }
   }
   if (/rss|\.xml$|feed/i.test(u.pathname)) return { key: 'rss_feeds', value: u.href }
   if (host.endsWith('bfmtv.com')) {
@@ -1122,6 +1188,101 @@ function SourcesManager({ settings, onSaved, goGuide }) {
   )
 }
 
+/* ---------------------------------------------------------------- book public */
+
+function BookSettings({ settings, onSaved }) {
+  const [f, setF] = useState({
+    book_public: !!settings.book_public,
+    book_title: settings.book_title || 'Mes reportages',
+    book_name: settings.book_name || '',
+    book_intro: settings.book_intro || '',
+  })
+  const [msg, setMsg] = useState('')
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
+  const save = async () => {
+    setMsg('')
+    try {
+      await act({ type: 'settings', settings: {
+        book_public: f.book_public,
+        book_title: f.book_title.trim() || 'Mes reportages',
+        book_name: f.book_name.trim(),
+        book_intro: f.book_intro.trim(),
+      } })
+      setMsg('Enregistré.')
+      onSaved()
+    } catch (e) { setMsg(`Impossible : ${e.message}`) }
+  }
+  const bookUrl = `${window.location.origin}/?book`
+  return (
+    <fieldset className="book-settings">
+      <legend>Book public</legend>
+      <p className="hint">Une page partageable qui montre uniquement les sujets marqués « à la une » dans Mes tournages — idéale à envoyer à un recruteur ou une rédaction.</p>
+      <label className="check"><input type="checkbox" checked={f.book_public} onChange={set('book_public')} /> Rendre mon book accessible par lien</label>
+      {f.book_public && <p className="hint">Lien : <a href={bookUrl} target="_blank" rel="noreferrer">{bookUrl.replace(/^https?:\/\//, '')}</a> — toute personne ayant le lien peut voir et lire les sujets à la une (le reste de l’app reste privé).</p>}
+      <label htmlFor="bk-name">Ton nom (en tête du book)</label>
+      <input id="bk-name" value={f.book_name} onChange={set('book_name')} placeholder="Hugo Lahouze" />
+      <label htmlFor="bk-title">Titre du book</label>
+      <input id="bk-title" value={f.book_title} onChange={set('book_title')} />
+      <label htmlFor="bk-intro">Phrase d’intro (facultatif)</label>
+      <textarea id="bk-intro" rows={2} value={f.book_intro} onChange={set('book_intro')} placeholder="Journaliste reporter d’images — BFM Marseille Provence" />
+      <button className="btn primary" onClick={save}>Enregistrer</button>
+      {msg && <p className="saved" role="status">{msg}</p>}
+    </fieldset>
+  )
+}
+
+function PublicBook() {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+  const [playing, setPlaying] = useState(null)
+  useEffect(() => {
+    fetch('/api/book')
+      .then(async (r) => { if (r.ok) setData(await r.json()); else setErr('Ce book n’est pas disponible.') })
+      .catch(() => setErr('Chargement impossible.'))
+  }, [])
+  if (err) return <main className="login"><h1 className="brand">Book</h1><p className="note">{err}</p></main>
+  if (!data) return null
+  return (
+    <div className="shell book-public">
+      <header className="top">
+        <div className="masthead"><h1 className="brand">{data.name || data.title}</h1></div>
+        {data.intro && <p className="status">{data.intro}</p>}
+      </header>
+      {!data.videos.length ? (
+        <div className="empty"><p>Aucun sujet pour l’instant.</p></div>
+      ) : (
+        <ul className="reel">
+          {data.videos.map((v) => (
+            <li key={v.id} className="reel-item">
+              <button className="reel-thumb" onClick={() => setPlaying(v)} aria-label={`Regarder ${v.title || 'la vidéo'}`}>
+                {v.thumbnail ? <img src={v.thumbnail} alt="" loading="lazy" /> : <div className="noimg" />}
+                {v.duration ? <span className="tc">{fmtDur(v.duration)}</span> : null}
+                <span className="playicon" aria-hidden>▶</span>
+              </button>
+              <div className="reel-body">
+                <h2 className="reel-title">{v.title || 'Sans titre'}</h2>
+                <p className="meta">{fmtDate(v.published_at)}, {v.channel || SOURCES[v.source]}
+                  {v.role && <span className="tag-chip">{v.role}</span>}
+                  {v.theme && <span className="tag-chip">{v.theme}</span>}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <footer className="foot"><p className="note">Réalisé avec Mes reportages.</p></footer>
+      {playing && (
+        <div className="player" role="dialog" aria-modal="true" aria-label={playing.title || 'Vidéo'} onClick={() => setPlaying(null)}>
+          <div className="player-box" onClick={(e) => e.stopPropagation()}>
+            <video src={`/api/book-video?id=${playing.file}`} controls autoPlay playsInline />
+            <div className="player-bar"><strong>{playing.title || 'Sans titre'}</strong><button className="btn" onClick={() => setPlaying(null)}>Fermer</button></div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ---------------------------------------------------------------- mode d'emploi */
 
 function Guide({ goTab }) {
@@ -1139,6 +1300,7 @@ function Guide({ goTab }) {
           <tbody>
             <tr><td>YouTube</td><td>Non analysé en ligne (voir « Si une plateforme est bloquée »).</td><td>—</td><td>Nécessite un ordinateur chez toi</td></tr>
             <tr><td>TikTok</td><td>Ouvre le profil du compte, puis Partager → Copier le lien.</td><td>tiktok.com/@nomducompte</td><td>Non</td></tr>
+            <tr><td>Dailymotion</td><td>Ouvre le compte (BFM, franceinfo…) et copie l’adresse de sa page.</td><td>dailymotion.com/BFMTV</td><td>Non</td></tr>
             <tr><td>Instagram</td><td>Ouvre le profil, puis ••• → Copier l’URL du profil.</td><td>instagram.com/nomducompte</td><td>Compte Instagram secondaire (voir plus bas)</td></tr>
             <tr><td>bfmtv.com</td><td>Ouvre la rubrique qui liste les vidéos, par exemple la page Marseille.</td><td>bfmtv.com/marseille/</td><td>Non</td></tr>
             <tr><td>Facebook, X</td><td>Pas de surveillance automatique possible.</td><td>—</td><td>Ajout par lien uniquement</td></tr>
@@ -1186,6 +1348,12 @@ function Guide({ goTab }) {
           <li><Go to="pending">À vérifier</Go> : les nouvelles détections. « Valider » les garde, « Écarter » supprime le fichier.</li>
           <li><Go to="library">Mes tournages</Go> : toutes tes vidéos par année, avec « Télécharger en 4K / 1080p » et l’export de la liste en Excel.</li>
         </ul>
+      </details>
+
+      <details>
+        <summary>Étiqueter et faire un book partageable</summary>
+        <p>Dans <Go to="library">Mes tournages</Go>, sous chaque sujet, tu peux noter <strong>ton rôle</strong> (JRI, voix off, présentateur) et un <strong>thème</strong>, et le marquer <strong>« à la une »</strong> (l’étoile).</p>
+        <p>Dans <Go to="settings">Réglages → Book public</Go>, active « Rendre mon book accessible par lien » et renseigne ton nom. Tu obtiens une page publique et élégante — ton adresse suivie de <code>/?book</code> — qui montre uniquement les sujets à la une. Parfait à envoyer à un recruteur ou une rédaction. Le reste de l’app reste privé.</p>
       </details>
 
       <details>

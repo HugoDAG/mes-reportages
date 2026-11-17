@@ -53,7 +53,8 @@ db = Store(STORAGE_REPO, STORAGE_TOKEN)
 
 DEFAULT_SETTINGS = {
     "name_variants": [], "youtube_channels": ["https://www.youtube.com/@BFM-Marseille", "https://www.youtube.com/@BFMTV"],
-    "tiktok_accounts": [], "instagram_accounts": [], "pages": ["https://www.bfmtv.com/marseille/"], "rss_feeds": [],
+    "tiktok_accounts": [], "instagram_accounts": [], "dailymotion_accounts": [],
+    "pages": ["https://www.bfmtv.com/marseille/"], "rss_feeds": [],
     "lookback": 200, "max_duration_min": 20, "tail_seconds": 60, "frame_interval": 2, "threshold": 70,
     "whisper_enabled": True, "face_enabled": True, "voice_enabled": True, "max_quality": 2160,
     "youtube_enabled": False,
@@ -205,6 +206,23 @@ def list_tiktok(account: str, limit: int):
                    "url": e.get("url") or f"{url}/video/{e['id']}",
                    "title": e.get("title") or e.get("description") or "",
                    "text": f"{e.get('title') or ''} {e.get('description') or ''}"}
+
+
+def list_dailymotion(account: str, limit: int):
+    """Vidéos d'un compte Dailymotion. Non bloqué côté serveur, contrairement à YouTube."""
+    acc = account.rstrip("/").split("/")[-1]
+    url = account if account.startswith("http") else f"https://www.dailymotion.com/{acc}"
+    with yt_dlp.YoutubeDL(ydl_opts(extract_flat="in_playlist", playlistend=limit)) as y:
+        info = y.extract_info(url, download=False)
+    for e in info.get("entries") or []:
+        if not e.get("id"):
+            continue
+        yield {"id": f"dailymotion:{e['id']}", "source": "dailymotion",
+               "channel": info.get("uploader") or acc,
+               "url": e.get("url") or f"https://www.dailymotion.com/video/{e['id']}",
+               "title": e.get("title") or "",
+               "text": f"{e.get('title') or ''} {e.get('description') or ''}",
+               "duration": e.get("duration")}
 
 
 def list_instagram(account: str, limit: int):
@@ -798,7 +816,14 @@ def process(v: dict, s, names, face, voice, tmp, manual=False) -> bool:
         "status": "kept" if manual else "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    db.update("data/videos.json", [], lambda lst: [x for x in lst if x["id"] != row["id"]] + [row],
+    def upsert(lst):
+        old = next((x for x in lst if x["id"] == row["id"]), None)
+        if old:  # ne pas écraser les étiquettes posées à la main dans l'app
+            for k in ("role", "theme", "featured"):
+                if old.get(k) is not None:
+                    row[k] = old[k]
+        return [x for x in lst if x["id"] != row["id"]] + [row]
+    db.update("data/videos.json", [], upsert,
               f"veille : nouveau tournage ({row['published_at'] or ''})"[:70])
     log("Vidéo enregistrée")
     log_analysis(v, {**res, "decision": "saved"})
@@ -825,7 +850,8 @@ def main():
             "bfmtv": ("off", "Aucune rubrique dans les réglages"),
             "tiktok": ("off", "Aucun compte dans les réglages"),
             "instagram": ("off", "Session Instagram non configurée" if not IG_SESSIONID
-                          else "Aucun compte dans les réglages")}
+                          else "Aucun compte dans les réglages"),
+            "dailymotion": ("off", "Aucun compte dans les réglages")}
 
     def write_platforms():
         now = datetime.now(timezone.utc).isoformat()
@@ -867,7 +893,7 @@ def main():
     results = {}
     for q in [x for x in queue if not x.get("processed")]:
         u = q["url"].lower()
-        src = next((k for k in ("instagram", "tiktok", "youtube", "facebook") if k in u),
+        src = next((k for k in ("instagram", "tiktok", "youtube", "dailymotion", "facebook") if k in u),
                    "x" if ("x.com" in u or "twitter.com" in u) else "bfmtv" if "bfmtv" in u else "manual")
         v = {"id": f"manual:{q['url']}", "source": src, "url": q["url"], "title": "", "text": ""}
         try:
@@ -892,6 +918,7 @@ def main():
     sources = ([("youtube", list_youtube, ch, (s["lookback"],)) for ch in s["youtube_channels"]] if yt else []) + \
               [("tiktok", list_tiktok, a, (s["lookback"],)) for a in s["tiktok_accounts"]] + \
               [("instagram", list_instagram, a, (s["lookback"],)) for a in s["instagram_accounts"]] + \
+              [("dailymotion", list_dailymotion, a, (s["lookback"],)) for a in s.get("dailymotion_accounts", [])] + \
               [("bfmtv", list_page, p, ()) for p in s["pages"]] + \
               [("bfmtv", list_rss, f, ()) for f in s["rss_feeds"]]
     counts = {}
