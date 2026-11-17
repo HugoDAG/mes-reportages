@@ -1290,7 +1290,7 @@ function Guide({ goTab }) {
   return (
     <article className="guide">
       <h2 className="h2">Mode d’emploi</h2>
-      <p className="lead">L’app analyse toute seule, tous les deux jours, les nouvelles vidéos des comptes que tu surveilles. Chaque vidéo où elle reconnaît ton nom, ton visage ou ta voix est téléchargée et rangée dans Mes tournages.</p>
+      <p className="lead">L’app analyse toute seule, tous les deux jours, les nouvelles vidéos des comptes que tu surveilles. Chaque vidéo où elle reconnaît ton nom, ton visage ou ta voix est téléchargée et rangée dans Mes tournages — où tu peux l’étiqueter et la mettre en avant dans un book partageable.</p>
 
       <details open>
         <summary>Ajouter un compte à surveiller</summary>
@@ -1311,7 +1311,7 @@ function Guide({ goTab }) {
 
       <details>
         <summary>Ajouter une vidéo précise</summary>
-        <p>Dans <Go to="library">Mes tournages</Go>, colle le lien de la vidéo dans « Ajouter une vidéo par son lien ». Ça marche pour YouTube, TikTok, Instagram, Facebook, X et bfmtv.com. La vidéo est téléchargée au prochain passage et rangée directement dans tes tournages validés.</p>
+        <p>Dans <Go to="library">Mes tournages</Go>, colle le lien de la vidéo dans « Ajouter une vidéo par son lien ». Ça marche pour TikTok, Dailymotion, Instagram, Facebook, X et bfmtv.com. La vidéo est téléchargée au prochain passage et rangée directement dans tes tournages validés. (YouTube n’est pas téléchargeable en ligne — voir « Si une plateforme est bloquée ».)</p>
       </details>
 
       <details>
@@ -1332,6 +1332,7 @@ function Guide({ goTab }) {
           <li><strong>Ressemblance minimale</strong> : à 70 %, c’est équilibré. Monte-la si trop de vidéos sans toi sont retenues, baisse-la si tu en rates.</li>
           <li><strong>Image analysée toutes les X secondes</strong> : 1 seconde est plus précis, mais plus lent.</li>
           <li><strong>Qualité enregistrée</strong> : jusqu’à 4K, ou 1080p pour prendre moins de place.</li>
+          <li><strong>Durée maximale</strong> : par défaut 20 min. Au-delà, une vidéo est marquée « Trop longue » et ignorée — c’est voulu, pour ménager le serveur gratuit. Les sujets longs (émissions) s’analysent mieux une fois le moteur sur ton PC.</li>
         </ul>
       </details>
 
